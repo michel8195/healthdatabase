@@ -6,7 +6,7 @@ Zepp device data formats for various health metrics.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 
 from src.etl.base_importer import CSVImporter, DataValidationError
@@ -14,6 +14,9 @@ from src.database.models import ActivityModel, SleepModel
 from src.database.connection import DatabaseConnection
 
 logger = logging.getLogger(__name__)
+
+# GMT-3 timezone (UTC-3)
+GMT_MINUS_3 = timezone(timedelta(hours=-3))
 
 
 class ZeppActivityImporter(CSVImporter):
@@ -157,13 +160,13 @@ class ZeppSleepImporter(CSVImporter):
 
     def _parse_sleep_timestamp(self, timestamp_str: Any) -> Optional[datetime]:
         """
-        Parse Zepp sleep timestamp.
+        Parse Zepp sleep timestamp and convert to GMT-3.
 
         Args:
-            timestamp_str: Timestamp string from Zepp
+            timestamp_str: Timestamp string from Zepp (in UTC)
 
         Returns:
-            Parsed datetime object or None if invalid
+            Parsed datetime object converted to GMT-3 or None if invalid
         """
         if not timestamp_str or timestamp_str.strip() == '':
             return None
@@ -171,7 +174,17 @@ class ZeppSleepImporter(CSVImporter):
         try:
             # Handle Zepp timestamp format: "2023-02-18 02:13:00+0000"
             clean_timestamp = timestamp_str.replace('+0000', '+00:00')
-            return datetime.fromisoformat(clean_timestamp)
+            utc_datetime = datetime.fromisoformat(clean_timestamp)
+
+            # Convert from UTC to GMT-3
+            gmt3_datetime = utc_datetime.astimezone(GMT_MINUS_3)
+
+            logger.debug(
+                f"Converted timestamp {timestamp_str} from UTC to GMT-3: "
+                f"{utc_datetime} -> {gmt3_datetime}"
+            )
+
+            return gmt3_datetime
         except (ValueError, AttributeError) as e:
             logger.warning(f"Failed to parse timestamp '{timestamp_str}': {e}")
             return None
