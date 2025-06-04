@@ -1,194 +1,321 @@
 """
-Database models and schema definitions for health data analytics system.
+Database models for health data.
+
+This module defines the database schema for various health data types
+using a modular approach with separate tables for different data types.
 """
 
 import logging
-from database.connection import DatabaseConnection
+from abc import ABC, abstractmethod
+from datetime import datetime
+from typing import Dict, List, Any
 
 logger = logging.getLogger(__name__)
 
 
-# SQL schema definitions
-CREATE_DAILY_ACTIVITY_TABLE = """
-CREATE TABLE IF NOT EXISTS daily_activity (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date DATE NOT NULL UNIQUE,
-    source VARCHAR(50) NOT NULL DEFAULT 'zepp',
-    steps INTEGER,
-    calories INTEGER,
-    distance REAL,
-    run_distance REAL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
+class BaseModel(ABC):
+    """Abstract base class for all data models."""
 
-CREATE_INDEXES = [
-    "CREATE INDEX IF NOT EXISTS idx_daily_activity_date ON daily_activity(date);",
-    "CREATE INDEX IF NOT EXISTS idx_daily_activity_source ON daily_activity(source);",
-    "CREATE INDEX IF NOT EXISTS idx_daily_activity_date_source ON daily_activity(date, source);"
-]
+    @abstractmethod
+    def get_table_name(self) -> str:
+        """Return the table name for this model."""
+        pass
 
-# Trigger to update the updated_at timestamp
-CREATE_UPDATE_TRIGGER = """
-CREATE TRIGGER IF NOT EXISTS update_daily_activity_timestamp
-AFTER UPDATE ON daily_activity
-FOR EACH ROW
-BEGIN
-    UPDATE daily_activity
-    SET updated_at = CURRENT_TIMESTAMP
-    WHERE id = NEW.id;
-END;
-"""
+    @abstractmethod
+    def get_create_sql(self) -> str:
+        """Return the SQL statement to create the table."""
+        pass
+
+    @abstractmethod
+    def get_indexes_sql(self) -> List[str]:
+        """Return SQL statements to create indexes."""
+        pass
+
+    @abstractmethod
+    def validate_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and normalize data before insertion."""
+        pass
 
 
-def create_tables(db_connection: DatabaseConnection) -> bool:
-    """
-    Create all database tables and indexes.
+class UserModel(BaseModel):
+    """Model for user information."""
 
-    Args:
-        db_connection: Database connection instance
+    def get_table_name(self) -> str:
+        return "users"
 
-    Returns:
-        True if successful, False otherwise
-    """
-    try:
-        logger.info("Creating database tables...")
+    def get_create_sql(self) -> str:
+        return """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT UNIQUE NOT NULL,
+            name TEXT,
+            email TEXT,
+            timezone TEXT DEFAULT 'UTC',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
 
-        # Create main table
-        with db_connection.get_cursor() as cursor:
-            cursor.execute(CREATE_DAILY_ACTIVITY_TABLE)
-            logger.info("Created daily_activity table")
-
-            # Create indexes
-            for index_sql in CREATE_INDEXES:
-                cursor.execute(index_sql)
-            logger.info("Created database indexes")
-
-            # Create update trigger
-            cursor.execute(CREATE_UPDATE_TRIGGER)
-            logger.info("Created update trigger")
-
-        logger.info("Database schema created successfully")
-        return True
-
-    except Exception as e:
-        logger.error(f"Failed to create database tables: {e}")
-        return False
-
-
-def verify_schema(db_connection: DatabaseConnection) -> bool:
-    """
-    Verify that the database schema is correct.
-
-    Args:
-        db_connection: Database connection instance
-
-    Returns:
-        True if schema is valid, False otherwise
-    """
-    try:
-        # Check if main table exists
-        table_info = db_connection.get_table_info('daily_activity')
-        if not table_info:
-            logger.error("daily_activity table does not exist")
-            return False
-
-        # Verify expected columns
-        expected_columns = [
-            'id', 'date', 'source', 'steps', 'calories',
-            'distance', 'run_distance', 'created_at', 'updated_at'
+    def get_indexes_sql(self) -> List[str]:
+        return [
+            "CREATE INDEX IF NOT EXISTS idx_users_user_id ON users(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)"
         ]
 
-        actual_columns = [col[1] for col in table_info]  # col[1] is column name
+    def validate_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate user data."""
+        required_fields = ['user_id']
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                raise ValueError(f"Required field '{field}' is missing")
 
-        for col in expected_columns:
-            if col not in actual_columns:
-                logger.error(f"Missing column: {col}")
-                return False
-
-        logger.info("Database schema verification passed")
-        return True
-
-    except Exception as e:
-        logger.error(f"Schema verification failed: {e}")
-        return False
-
-
-def get_table_stats(db_connection: DatabaseConnection) -> dict:
-    """
-    Get statistics about the database tables.
-
-    Args:
-        db_connection: Database connection instance
-
-    Returns:
-        Dictionary with table statistics
-    """
-    try:
-        stats = {}
-
-        # Get row count
-        result = db_connection.execute_query(
-            "SELECT COUNT(*) as count FROM daily_activity"
-        )
-        stats['total_records'] = result[0]['count'] if result else 0
-
-        # Get date range
-        result = db_connection.execute_query(
-            "SELECT MIN(date) as min_date, MAX(date) as max_date FROM daily_activity"
-        )
-        if result and result[0]['min_date']:
-            stats['date_range'] = {
-                'min_date': result[0]['min_date'],
-                'max_date': result[0]['max_date']
-            }
-
-        # Get source breakdown
-        result = db_connection.execute_query(
-            "SELECT source, COUNT(*) as count FROM daily_activity GROUP BY source"
-        )
-        stats['sources'] = {row['source']: row['count'] for row in result}
-
-        return stats
-
-    except Exception as e:
-        logger.error(f"Failed to get table stats: {e}")
-        return {}
-
-
-class DailyActivity:
-    """Model class for daily activity data."""
-
-    def __init__(self, date: str, source: str = 'zepp', steps: int = None,
-                 calories: int = None, distance: float = None,
-                 run_distance: float = None):
-        self.date = date
-        self.source = source
-        self.steps = steps
-        self.calories = calories
-        self.distance = distance
-        self.run_distance = run_distance
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary for database operations."""
         return {
-            'date': self.date,
-            'source': self.source,
-            'steps': self.steps,
-            'calories': self.calories,
-            'distance': self.distance,
-            'run_distance': self.run_distance
+            'user_id': str(data['user_id']),
+            'name': data.get('name'),
+            'email': data.get('email'),
+            'timezone': data.get('timezone', 'UTC')
         }
 
-    @classmethod
-    def from_dict(cls, data: dict) -> 'DailyActivity':
-        """Create instance from dictionary."""
-        return cls(
-            date=data['date'],
-            source=data.get('source', 'zepp'),
-            steps=data.get('steps'),
-            calories=data.get('calories'),
-            distance=data.get('distance'),
-            run_distance=data.get('run_distance')
+
+class ActivityModel(BaseModel):
+    """Model for daily activity data (steps, calories, distance)."""
+
+    def get_table_name(self) -> str:
+        return "daily_activity"
+
+    def get_create_sql(self) -> str:
+        return """
+        CREATE TABLE IF NOT EXISTS daily_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            date DATE NOT NULL,
+            steps INTEGER DEFAULT 0,
+            calories REAL DEFAULT 0.0,
+            distance REAL DEFAULT 0.0,
+            run_distance REAL DEFAULT 0.0,
+            active_minutes INTEGER DEFAULT 0,
+            data_source TEXT NOT NULL DEFAULT 'zepp',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            UNIQUE(user_id, date, data_source)
         )
+        """
+
+    def get_indexes_sql(self) -> List[str]:
+        return [
+            "CREATE INDEX IF NOT EXISTS idx_activity_user_date "
+            "ON daily_activity(user_id, date)",
+            "CREATE INDEX IF NOT EXISTS idx_activity_date "
+            "ON daily_activity(date)",
+            "CREATE INDEX IF NOT EXISTS idx_activity_source "
+            "ON daily_activity(data_source)",
+            "CREATE INDEX IF NOT EXISTS idx_activity_steps "
+            "ON daily_activity(steps)"
+        ]
+
+    def validate_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate activity data."""
+        required_fields = ['user_id', 'date']
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                raise ValueError(f"Required field '{field}' is missing")
+
+        # Parse date if it's a string
+        date_val = data['date']
+        if isinstance(date_val, str):
+            try:
+                date_val = datetime.strptime(date_val, '%Y-%m-%d').date()
+            except ValueError:
+                raise ValueError(f"Invalid date format: {date_val}")
+
+        return {
+            'user_id': int(data['user_id']),
+            'date': date_val,
+            'steps': max(0, int(data.get('steps', 0))),
+            'calories': max(0.0, float(data.get('calories', 0.0))),
+            'distance': max(0.0, float(data.get('distance', 0.0))),
+            'run_distance': max(0.0, float(data.get('run_distance', 0.0))),
+            'active_minutes': max(0, int(data.get('active_minutes', 0))),
+            'data_source': str(data.get('data_source', 'zepp'))
+        }
+
+
+class SleepModel(BaseModel):
+    """Model for sleep data."""
+
+    def get_table_name(self) -> str:
+        return "sleep_data"
+
+    def get_create_sql(self) -> str:
+        return """
+        CREATE TABLE IF NOT EXISTS sleep_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            date DATE NOT NULL,
+            sleep_start TIMESTAMP,
+            sleep_end TIMESTAMP,
+            total_sleep_minutes INTEGER DEFAULT 0,
+            deep_sleep_minutes INTEGER DEFAULT 0,
+            light_sleep_minutes INTEGER DEFAULT 0,
+            rem_sleep_minutes INTEGER DEFAULT 0,
+            wake_minutes INTEGER DEFAULT 0,
+            sleep_efficiency REAL DEFAULT 0.0,
+            naps_data TEXT,  -- JSON string for nap data
+            data_source TEXT NOT NULL DEFAULT 'zepp',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id),
+            UNIQUE(user_id, date, data_source)
+        )
+        """
+
+    def get_indexes_sql(self) -> List[str]:
+        return [
+            "CREATE INDEX IF NOT EXISTS idx_sleep_user_date "
+            "ON sleep_data(user_id, date)",
+            "CREATE INDEX IF NOT EXISTS idx_sleep_date "
+            "ON sleep_data(date)",
+            "CREATE INDEX IF NOT EXISTS idx_sleep_source "
+            "ON sleep_data(data_source)",
+            "CREATE INDEX IF NOT EXISTS idx_sleep_total "
+            "ON sleep_data(total_sleep_minutes)",
+            "CREATE INDEX IF NOT EXISTS idx_sleep_start "
+            "ON sleep_data(sleep_start)"
+        ]
+
+    def validate_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate sleep data."""
+        required_fields = ['user_id', 'date']
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                raise ValueError(f"Required field '{field}' is missing")
+
+        # Parse date if it's a string
+        date_val = data['date']
+        if isinstance(date_val, str):
+            try:
+                date_val = datetime.strptime(date_val, '%Y-%m-%d').date()
+            except ValueError:
+                raise ValueError(f"Invalid date format: {date_val}")
+
+        # Parse timestamps
+        sleep_start = None
+        sleep_end = None
+
+        if data.get('sleep_start'):
+            if isinstance(data['sleep_start'], str):
+                try:
+                    sleep_start = datetime.fromisoformat(data['sleep_start'].replace('+0000', '+00:00'))
+                except ValueError:
+                    logger.warning(f"Invalid sleep_start format: {data['sleep_start']}")
+            else:
+                sleep_start = data['sleep_start']
+
+        if data.get('sleep_end'):
+            if isinstance(data['sleep_end'], str):
+                try:
+                    sleep_end = datetime.fromisoformat(data['sleep_end'].replace('+0000', '+00:00'))
+                except ValueError:
+                    logger.warning(f"Invalid sleep_end format: {data['sleep_end']}")
+            else:
+                sleep_end = data['sleep_end']
+
+        # Calculate total sleep if not provided
+        total_sleep = data.get('total_sleep_minutes', 0)
+        if not total_sleep and sleep_start and sleep_end:
+            total_sleep = int((sleep_end - sleep_start).total_seconds() / 60)
+
+        return {
+            'user_id': int(data['user_id']),
+            'date': date_val,
+            'sleep_start': sleep_start,
+            'sleep_end': sleep_end,
+            'total_sleep_minutes': max(0, int(total_sleep)),
+            'deep_sleep_minutes': max(0, int(data.get('deep_sleep_minutes', 0))),
+            'light_sleep_minutes': max(0, int(data.get('light_sleep_minutes', 0))),
+            'rem_sleep_minutes': max(0, int(data.get('rem_sleep_minutes', 0))),
+            'wake_minutes': max(0, int(data.get('wake_minutes', 0))),
+            'sleep_efficiency': max(0.0, min(100.0, float(data.get('sleep_efficiency', 0.0)))),
+            'naps_data': data.get('naps_data'),
+            'data_source': str(data.get('data_source', 'zepp'))
+        }
+
+
+class HeartRateModel(BaseModel):
+    """Model for heart rate data."""
+
+    def get_table_name(self) -> str:
+        return "heart_rate_data"
+
+    def get_create_sql(self) -> str:
+        return """
+        CREATE TABLE IF NOT EXISTS heart_rate_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            timestamp TIMESTAMP NOT NULL,
+            heart_rate INTEGER NOT NULL,
+            resting_hr INTEGER,
+            max_hr INTEGER,
+            data_source TEXT NOT NULL DEFAULT 'zepp',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        """
+
+    def get_indexes_sql(self) -> List[str]:
+        return [
+            "CREATE INDEX IF NOT EXISTS idx_hr_user_timestamp ON heart_rate_data(user_id, timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_hr_timestamp ON heart_rate_data(timestamp)",
+            "CREATE INDEX IF NOT EXISTS idx_hr_source ON heart_rate_data(data_source)",
+            "CREATE INDEX IF NOT EXISTS idx_hr_value ON heart_rate_data(heart_rate)"
+        ]
+
+    def validate_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate heart rate data."""
+        required_fields = ['user_id', 'timestamp', 'heart_rate']
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                raise ValueError(f"Required field '{field}' is missing")
+
+        # Parse timestamp
+        timestamp_val = data['timestamp']
+        if isinstance(timestamp_val, str):
+            try:
+                timestamp_val = datetime.fromisoformat(timestamp_val.replace('+0000', '+00:00'))
+            except ValueError:
+                raise ValueError(f"Invalid timestamp format: {timestamp_val}")
+
+        heart_rate = int(data['heart_rate'])
+        if heart_rate < 30 or heart_rate > 220:  # Basic heart rate validation
+            raise ValueError(f"Invalid heart rate value: {heart_rate}")
+
+        return {
+            'user_id': int(data['user_id']),
+            'timestamp': timestamp_val,
+            'heart_rate': heart_rate,
+            'resting_hr': int(data['resting_hr']) if data.get('resting_hr') else None,
+            'max_hr': int(data['max_hr']) if data.get('max_hr') else None,
+            'data_source': str(data.get('data_source', 'zepp'))
+        }
+
+
+# Model registry for easy access
+MODEL_REGISTRY = {
+    'users': UserModel(),
+    'activity': ActivityModel(),
+    'sleep': SleepModel(),
+    'heart_rate': HeartRateModel()
+}
+
+
+def get_model(model_name: str) -> BaseModel:
+    """Get a model instance by name."""
+    if model_name not in MODEL_REGISTRY:
+        raise ValueError(f"Unknown model: {model_name}")
+    return MODEL_REGISTRY[model_name]
+
+
+def get_all_models() -> Dict[str, BaseModel]:
+    """Get all available models."""
+    return MODEL_REGISTRY.copy()
