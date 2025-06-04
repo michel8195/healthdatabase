@@ -242,6 +242,77 @@ class SleepModel(BaseModel):
         }
 
 
+class SportModel(BaseModel):
+    """Model for sport/exercise data."""
+
+    def get_table_name(self) -> str:
+        return "sport_data"
+
+    def get_create_sql(self) -> str:
+        return """
+        CREATE TABLE IF NOT EXISTS sport_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            start_time TIMESTAMP NOT NULL,
+            sport_type INTEGER NOT NULL,
+            duration_seconds INTEGER DEFAULT 0,
+            distance_meters REAL DEFAULT 0.0,
+            calories REAL DEFAULT 0.0,
+            avg_pace_per_meter REAL DEFAULT 0.0,
+            max_pace_per_meter REAL DEFAULT 0.0,
+            min_pace_per_meter REAL DEFAULT 0.0,
+            data_source TEXT NOT NULL DEFAULT 'zepp',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        """
+
+    def get_indexes_sql(self) -> List[str]:
+        return [
+            "CREATE INDEX IF NOT EXISTS idx_sport_user_start "
+            "ON sport_data(user_id, start_time)",
+            "CREATE INDEX IF NOT EXISTS idx_sport_start_time "
+            "ON sport_data(start_time)",
+            "CREATE INDEX IF NOT EXISTS idx_sport_type "
+            "ON sport_data(sport_type)",
+            "CREATE INDEX IF NOT EXISTS idx_sport_source "
+            "ON sport_data(data_source)",
+            "CREATE INDEX IF NOT EXISTS idx_sport_duration "
+            "ON sport_data(duration_seconds)",
+            "CREATE INDEX IF NOT EXISTS idx_sport_distance "
+            "ON sport_data(distance_meters)"
+        ]
+
+    def validate_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate sport data."""
+        required_fields = ['user_id', 'start_time', 'sport_type']
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                raise ValueError(f"Required field '{field}' is missing")
+
+        # Parse start time
+        start_time = data['start_time']
+        if isinstance(start_time, str):
+            try:
+                start_time = datetime.fromisoformat(start_time.replace('+0000', '+00:00'))
+            except ValueError:
+                raise ValueError(f"Invalid start_time format: {start_time}")
+
+        return {
+            'user_id': int(data['user_id']),
+            'start_time': start_time,
+            'sport_type': int(data['sport_type']),
+            'duration_seconds': max(0, int(data.get('duration_seconds', 0))),
+            'distance_meters': max(0.0, float(data.get('distance_meters', 0.0))),
+            'calories': max(0.0, float(data.get('calories', 0.0))),
+            'avg_pace_per_meter': float(data.get('avg_pace_per_meter', 0.0)),
+            'max_pace_per_meter': float(data.get('max_pace_per_meter', 0.0)),
+            'min_pace_per_meter': float(data.get('min_pace_per_meter', 0.0)),
+            'data_source': str(data.get('data_source', 'zepp'))
+        }
+
+
 class HeartRateModel(BaseModel):
     """Model for heart rate data."""
 
@@ -305,6 +376,7 @@ MODEL_REGISTRY = {
     'users': UserModel(),
     'activity': ActivityModel(),
     'sleep': SleepModel(),
+    'sport': SportModel(),
     'heart_rate': HeartRateModel()
 }
 

@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 
 from src.etl.base_importer import CSVImporter, DataValidationError
-from src.database.models import ActivityModel, SleepModel
+from src.database.models import ActivityModel, SleepModel, SportModel
 from src.database.connection import DatabaseConnection
 
 logger = logging.getLogger(__name__)
@@ -190,6 +190,128 @@ class ZeppSleepImporter(CSVImporter):
             return None
 
 
+class ZeppSportImporter(CSVImporter):
+    """Importer for Zepp sport/exercise data."""
+
+    def __init__(self, db_connection: DatabaseConnection):
+        """Initialize Zepp sport importer."""
+        super().__init__(db_connection, SportModel())
+
+    def get_data_source_name(self) -> str:
+        """Return the data source name."""
+        return 'zepp'
+
+    def transform_record(self, raw_record: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Transform Zepp sport record to standard format.
+
+        Expected Zepp CSV format:
+        type,startTime,sportTime(s),maxPace(/meter),minPace(/meter),
+        distance(m),avgPace(/meter),calories(kcal)
+        """
+        try:
+            # Parse start time with timezone conversion to GMT-3
+            start_time = self._parse_sport_timestamp(
+                raw_record.get('startTime')
+            )
+
+            # Get sport metrics
+            duration_seconds = self._safe_int_conversion(
+                raw_record.get('sportTime(s)', 0)
+            )
+            distance_meters = self._safe_float_conversion(
+                raw_record.get('distance(m)', 0)
+            )
+            calories = self._safe_float_conversion(
+                raw_record.get('calories(kcal)', 0)
+            )
+
+            # Get pace metrics - handle -1.0 as invalid/null values
+            avg_pace = self._safe_pace_conversion(
+                raw_record.get('avgPace(/meter)', 0)
+            )
+            max_pace = self._safe_pace_conversion(
+                raw_record.get('maxPace(/meter)', 0)
+            )
+            min_pace = self._safe_pace_conversion(
+                raw_record.get('minPace(/meter)', 0)
+            )
+
+            return {
+                'start_time': start_time,
+                'sport_type': int(raw_record['type']),
+                'duration_seconds': duration_seconds,
+                'distance_meters': distance_meters,
+                'calories': calories,
+                'avg_pace_per_meter': avg_pace,
+                'max_pace_per_meter': max_pace,
+                'min_pace_per_meter': min_pace
+            }
+
+        except KeyError as e:
+            raise DataValidationError(f"Missing required field: {e}")
+        except ValueError as e:
+            raise DataValidationError(f"Invalid data format: {e}")
+
+    def _safe_int_conversion(self, value: Any) -> int:
+        """Safely convert value to integer."""
+        if value is None or value == '':
+            return 0
+        try:
+            return int(float(value))
+        except (ValueError, TypeError):
+            return 0
+
+    def _safe_float_conversion(self, value: Any) -> float:
+        """Safely convert value to float."""
+        if value is None or value == '':
+            return 0.0
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return 0.0
+
+    def _safe_pace_conversion(self, value: Any) -> float:
+        """Safely convert pace value, treating -1.0 as invalid."""
+        if value is None or value == '' or value == -1.0:
+            return 0.0
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return 0.0
+
+    def _parse_sport_timestamp(self, timestamp_str: Any) -> Optional[datetime]:
+        """
+        Parse Zepp sport timestamp and convert to GMT-3.
+
+        Args:
+            timestamp_str: Timestamp string from Zepp (in UTC)
+
+        Returns:
+            Parsed datetime object converted to GMT-3 or None if invalid
+        """
+        if not timestamp_str or timestamp_str.strip() == '':
+            return None
+
+        try:
+            # Handle Zepp timestamp format: "2025-05-18 15:18:00+0000"
+            clean_timestamp = timestamp_str.replace('+0000', '+00:00')
+            utc_datetime = datetime.fromisoformat(clean_timestamp)
+
+            # Convert from UTC to GMT-3
+            gmt3_datetime = utc_datetime.astimezone(GMT_MINUS_3)
+
+            logger.debug(
+                f"Converted sport timestamp {timestamp_str} from UTC to GMT-3: "
+                f"{utc_datetime} -> {gmt3_datetime}"
+            )
+
+            return gmt3_datetime
+        except (ValueError, AttributeError) as e:
+            logger.warning(f"Failed to parse timestamp '{timestamp_str}': {e}")
+            return None
+
+
 def create_zepp_importer(data_type: str,
                         db_connection: DatabaseConnection) -> CSVImporter:
     """
@@ -207,7 +329,8 @@ def create_zepp_importer(data_type: str,
     """
     importers = {
         'activity': ZeppActivityImporter,
-        'sleep': ZeppSleepImporter
+        'sleep': ZeppSleepImporter,
+        'sport': ZeppSportImporter
     }
 
     if data_type not in importers:

@@ -50,6 +50,7 @@ class BulkImporter:
         discovered_files = {
             'activity': [],
             'sleep': [],
+            'sport': [],
             'heartrate': []
         }
 
@@ -77,6 +78,13 @@ class BulkImporter:
                 for file_path in sleep_dir.glob('SLEEP_*.csv'):
                     discovered_files['sleep'].append(file_path)
                     logger.debug(f"Found sleep file: {file_path}")
+
+            # Look for sport files
+            sport_dir = export_dir / 'SPORT'
+            if sport_dir.exists():
+                for file_path in sport_dir.glob('SPORT_*.csv'):
+                    discovered_files['sport'].append(file_path)
+                    logger.debug(f"Found sport file: {file_path}")
 
             # Look for heart rate files
             heartrate_dir = export_dir / 'HEARTRATE'
@@ -111,6 +119,7 @@ class BulkImporter:
         table_map = {
             'activity': 'daily_activity',
             'sleep': 'sleep_data',
+            'sport': 'sport_data',
             'heartrate': 'heart_rate_data'
         }
 
@@ -119,46 +128,85 @@ class BulkImporter:
             logger.error(f"Unknown data type: {data_type}")
             return records, []
 
-                # Extract unique keys from records for batch checking
-        # Use (user_id, date, data_source) as the unique key
-        unique_keys = []
-        for record in records:
-            key = (record['user_id'], record['date'], record['data_source'])
-            unique_keys.append(key)
+        # Extract unique keys from records for batch checking
+        # Sport data uses start_time instead of date
+        if data_type == 'sport':
+            unique_keys = []
+            for record in records:
+                key = (record['user_id'], record['start_time'], record['data_source'])
+                unique_keys.append(key)
 
-        # Build query to check for existing records
-        key_conditions = []
-        query_params = []
-        for user_id, date, data_source in unique_keys:
-            key_conditions.append("(user_id = ? AND date = ? AND data_source = ?)")
-            query_params.extend([user_id, date, data_source])
+            # Build query to check for existing records
+            key_conditions = []
+            query_params = []
+            for user_id, start_time, data_source in unique_keys:
+                key_conditions.append("(user_id = ? AND start_time = ? AND data_source = ?)")
+                query_params.extend([user_id, start_time, data_source])
 
-        query = f"""
-            SELECT user_id, date, data_source
-            FROM {table_name}
-            WHERE {' OR '.join(key_conditions)}
-        """
+            query = f"""
+                SELECT user_id, start_time, data_source
+                FROM {table_name}
+                WHERE {' OR '.join(key_conditions)}
+            """
 
-        existing_keys = set()
-        try:
-            results = self.db_connection.execute_query(query, tuple(query_params))
-            existing_keys = {(row['user_id'], row['date'], row['data_source'])
-                           for row in results}
-        except Exception as e:
-            logger.error(f"Error checking for duplicates: {e}")
-            # If we can't check, assume all are new to be safe
-            return records, []
+            existing_keys = set()
+            try:
+                results = self.db_connection.execute_query(query, tuple(query_params))
+                existing_keys = {(row['user_id'], row['start_time'], row['data_source'])
+                               for row in results}
+            except Exception as e:
+                logger.error(f"Error checking for duplicates: {e}")
+                return records, []
 
-        # Separate records
-        new_records = []
-        existing_records = []
+            # Separate records
+            new_records = []
+            existing_records = []
 
-        for record in records:
-            key = (record['user_id'], record['date'], record['data_source'])
-            if key in existing_keys:
-                existing_records.append(record)
-            else:
-                new_records.append(record)
+            for record in records:
+                key = (record['user_id'], record['start_time'], record['data_source'])
+                if key in existing_keys:
+                    existing_records.append(record)
+                else:
+                    new_records.append(record)
+        else:
+            # Use (user_id, date, data_source) as the unique key for other data types
+            unique_keys = []
+            for record in records:
+                key = (record['user_id'], record['date'], record['data_source'])
+                unique_keys.append(key)
+
+            # Build query to check for existing records
+            key_conditions = []
+            query_params = []
+            for user_id, date, data_source in unique_keys:
+                key_conditions.append("(user_id = ? AND date = ? AND data_source = ?)")
+                query_params.extend([user_id, date, data_source])
+
+            query = f"""
+                SELECT user_id, date, data_source
+                FROM {table_name}
+                WHERE {' OR '.join(key_conditions)}
+            """
+
+            existing_keys = set()
+            try:
+                results = self.db_connection.execute_query(query, tuple(query_params))
+                existing_keys = {(row['user_id'], row['date'], row['data_source'])
+                               for row in results}
+            except Exception as e:
+                logger.error(f"Error checking for duplicates: {e}")
+                return records, []
+
+            # Separate records
+            new_records = []
+            existing_records = []
+
+            for record in records:
+                key = (record['user_id'], record['date'], record['data_source'])
+                if key in existing_keys:
+                    existing_records.append(record)
+                else:
+                    new_records.append(record)
 
         logger.info(f"Duplicate check for {data_type}: "
                    f"{len(new_records)} new, {len(existing_records)} existing")
@@ -215,6 +263,7 @@ class BulkImporter:
         table_map = {
             'activity': 'daily_activity',
             'sleep': 'sleep_data',
+            'sport': 'sport_data',
             'heartrate': 'heart_rate_data'
         }
 
@@ -275,6 +324,7 @@ class BulkImporter:
         table_map = {
             'activity': 'daily_activity',
             'sleep': 'sleep_data',
+            'sport': 'sport_data',
             'heartrate': 'heart_rate_data'
         }
 
