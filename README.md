@@ -24,6 +24,13 @@ A comprehensive, extensible system for importing, storing, and analyzing health 
 - **Error Handling**: Robust error handling with detailed logging
 - **Batch Processing**: Efficient batch imports with progress tracking
 
+### 📦 **Advanced Import Features**
+- **Bulk Import**: Process multiple files from multiple directories automatically
+- **Duplicate Handling**: Intelligent duplicate detection and resolution strategies
+- **File Discovery**: Automatic scanning of complex directory structures
+- **Dry Run Mode**: Safe testing of imports without data modification
+- **Import Statistics**: Detailed reporting of import operations and results
+
 ## Quick Start
 
 ### 1. Setup Environment
@@ -50,6 +57,7 @@ python scripts/setup_new_database.py
 
 ### 3. Import Your Data
 
+#### Single File Import
 ```bash
 # Import activity data
 python scripts/import_health_data.py activity path/to/your/ACTIVITY.csv
@@ -60,6 +68,33 @@ python scripts/import_health_data.py sleep path/to/your/SLEEP.csv
 # Dry run to validate data first
 python scripts/import_health_data.py activity path/to/your/ACTIVITY.csv --dry-run
 ```
+
+#### Bulk Import (Multiple Files)
+The system supports bulk importing from multiple files with intelligent duplicate handling:
+
+```bash
+# Bulk import from multiple ZEPP export directories
+python scripts/bulk_import_health_data.py raw/ZEPP/
+
+# Dry run to see what would be imported
+python scripts/bulk_import_health_data.py raw/ZEPP/ --dry-run
+
+# Import with different duplicate strategies
+python scripts/bulk_import_health_data.py raw/ZEPP/ --duplicate-strategy update   # Update existing records (default)
+python scripts/bulk_import_health_data.py raw/ZEPP/ --duplicate-strategy skip    # Skip duplicate records
+python scripts/bulk_import_health_data.py raw/ZEPP/ --duplicate-strategy error   # Fail on duplicates
+
+# Verbose logging for troubleshooting
+python scripts/bulk_import_health_data.py raw/ZEPP/ --verbose
+```
+
+**Bulk Import Features:**
+- 🔍 **Automatic Discovery**: Scans directories to find ZEPP data files
+- 🔄 **Duplicate Detection**: Uses `(user_id, date, data_source)` as unique key
+- ⚙️ **Flexible Strategies**: Handle duplicates with update, skip, or error
+- 📊 **Batch Processing**: Efficient processing of large datasets
+- 🧪 **Dry Run Mode**: Test imports without modifying data
+- 📝 **Comprehensive Logging**: Detailed progress and error reporting
 
 ### 4. Verify Import
 
@@ -106,6 +141,7 @@ graph LR
 ### ETL Layer (`src/etl/`)
 - **`base_importer.py`**: Abstract base classes for all importers
 - **`zepp_importers.py`**: Zepp-specific importers for activity and sleep data
+- **`bulk_importer.py`**: Advanced bulk import system with duplicate handling
 - **Extensible**: Easy to add new source importers
 
 ### Analysis Layer (`notebooks/`)
@@ -151,6 +187,76 @@ date,deepSleepTime,shallowSleepTime,wakeTime,start,stop,REMTime,naps
 2. Implement required methods: `get_data_source_name()`, `parse_file()`, `transform_record()`
 3. Add to factory function in respective module
 4. Update CLI arguments
+
+## Bulk Import System
+
+The bulk import system (`BulkImporter` class) provides advanced functionality for processing multiple files with intelligent duplicate handling.
+
+### Key Methods
+
+#### File Discovery
+```python
+discover_zepp_files(root_directory: str) -> List[Dict[str, Any]]
+```
+- Scans directory structures recursively
+- Identifies data files by type (ACTIVITY, SLEEP, HEARTRATE)
+- Returns metadata including file paths, types, and estimated record counts
+
+#### Duplicate Detection
+```python
+check_for_duplicates(records: List[Dict], data_type: str) -> Dict[str, Any]
+```
+- Uses composite unique key: `(user_id, date, data_source)`
+- Identifies existing records in database
+- Returns detailed duplicate analysis
+
+#### Duplicate Handling Strategies
+```python
+handle_duplicate_strategy(strategy: str, existing_records: List, new_records: List)
+```
+- **`update`**: Replace existing records with new data (default)
+- **`skip`**: Keep existing records, ignore duplicates
+- **`error`**: Fail import if duplicates are found
+
+### Command Line Interface
+
+The bulk import script (`scripts/bulk_import_health_data.py`) provides:
+
+```bash
+# Basic usage
+python scripts/bulk_import_health_data.py <directory>
+
+# Options
+--dry-run                    # Test mode - no database changes
+--duplicate-strategy <mode>  # 'update', 'skip', or 'error'
+--verbose                    # Detailed logging
+--help                       # Show all options
+```
+
+### Supported Directory Structures
+```
+raw/ZEPP/
+├── 3075021305_1749047212827/
+│   ├── ACTIVITY/
+│   │   └── ACTIVITY_1749047210565.csv
+│   ├── SLEEP/
+│   │   └── SLEEP_1749047211599.csv
+│   └── HEARTRATE/
+│       └── HEARTRATE_1749047212826.csv
+└── 3075021305_1749046767350/
+    ├── ACTIVITY/
+    │   └── ACTIVITY_1749046763267.csv
+    └── SLEEP/
+        └── SLEEP_1749046764545.csv
+```
+
+### Import Statistics
+Each bulk import provides comprehensive statistics:
+- Files discovered and processed
+- Records imported vs. skipped
+- Duplicate handling results
+- Error summaries
+- Processing time and performance metrics
 
 ## Development
 
