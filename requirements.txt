@@ -1,0 +1,19 @@
+# Health Data Analytics System Requirements
+# Core dependencies for database and data processing
+
+# No external dependencies required - using only Python standard library:
+# - sqlite3 (built-in)
+# - csv (built-in)
+# - pathlib (built-in)
+# - logging (built-in)
+# - datetime (built-in)
+# - typing (built-in)
+
+# Development dependencies for code quality:
+pre-commit>=3.6.0
+
+# Future dependencies for analysis and visualization:
+# pandas>=1.5.0
+# matplotlib>=3.6.0
+# seaborn>=0.11.0
+# numpy>=1.21.0

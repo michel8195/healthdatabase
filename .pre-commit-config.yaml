@@ -1,0 +1,52 @@
+repos:
+  # WebSec hook is MANDATORY, DO NOT comment it.
+  - repo: https://github.com/melisource/fury_websec-git-hooks
+    rev: v2.0.0
+    hooks:
+      - id: pre_commit_hook
+        stages: [ commit ]
+      - id: post_commit_hook
+        stages: [ post-commit ]
+
+  # Datasec hook is MANDATORY, DO NOT comment it.
+  - repo: https://github.com/melisource/fury_datasec-git-hooks
+    rev: 1.2.2
+    hooks:
+      - id: pre_commit_hook
+        stages: [ commit ]
+      - id: post_commit_hook
+        stages: [ post-commit ]
+
+  # - repo: https://github.com/pycqa/isort
+  #   rev: 5.13.2
+  #   hooks:
+  #     - id: isort
+        # args: ["--profile",".code_quality/pyproject_isort.toml" ]
+        # args: [ "--profile", "black", "--filter-files" ]
+
+  # - repo: https://github.com/psf/black
+  #   rev: 24.10.0
+  #   hooks:
+  #     - id: black
+        # It is recommended to specify the latest version of Python
+        # supported by your project here, or alternatively use
+        # pre-commit's default_language_version, see
+        # https://pre-commit.com/#top_level-default_language_version
+        # args: [ "--config",".code_quality/pyproject_black.toml" ]
+
+  # - repo: https://github.com/pycqa/flake8
+  #   rev: 7.1.1
+  #   hooks:
+  #     - id: flake8
+  #       additional_dependencies:
+  #         - Flake8-pyproject==1.2.3
+  #       args:
+  #         - --config=.code_quality/.flake8
+
+  # - repo: https://github.com/PyCQA/docformatter
+  #   rev: v1.7.5
+  #   hooks:
+  #     - id: docformatter
+  #       additional_dependencies: [ tomli ]
+  #       args: [ --in-place, --config, ./pyproject.toml ]
+  #       exclude: ^(tests|notebooks)/
