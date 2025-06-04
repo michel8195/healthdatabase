@@ -8,6 +8,12 @@ from contextlib import contextmanager
 from typing import Optional, Generator
 import logging
 
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    PANDAS_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,7 +76,8 @@ class DatabaseConnection:
         finally:
             conn.close()
 
-    def execute_query(self, query: str, params: Optional[tuple] = None) -> list:
+    def execute_query(self, query: str,
+                      params: Optional[tuple] = None) -> list:
         """
         Execute a SELECT query and return results.
 
@@ -88,7 +95,8 @@ class DatabaseConnection:
                 cursor.execute(query)
             return cursor.fetchall()
 
-    def execute_insert(self, query: str, params: Optional[tuple] = None) -> int:
+    def execute_insert(self, query: str,
+                       params: Optional[tuple] = None) -> Optional[int]:
         """
         Execute an INSERT query and return the last row ID.
 
@@ -97,7 +105,7 @@ class DatabaseConnection:
             params: Query parameters
 
         Returns:
-            ID of the inserted row
+            ID of the inserted row, or None if no row was inserted
         """
         with self.get_cursor() as cursor:
             if params:
@@ -142,3 +150,33 @@ class DatabaseConnection:
         """
         query = f"PRAGMA table_info({table_name})"
         return self.execute_query(query)
+
+    def query_to_dataframe(self, query: str,
+                           params: Optional[tuple] = None):
+        """
+        Execute a query and return results as a pandas DataFrame with
+        proper column names.
+
+        Args:
+            query: SQL query string
+            params: Query parameters
+
+        Returns:
+            pandas DataFrame with proper column names
+
+        Raises:
+            ImportError: If pandas is not available
+        """
+        if not PANDAS_AVAILABLE:
+            raise ImportError(
+                "pandas is required for query_to_dataframe method"
+            )
+
+        rows = self.execute_query(query, params)
+        if not rows:
+            return pd.DataFrame()
+
+        # Convert sqlite3.Row objects to dictionaries to preserve
+        # column names
+        data = [dict(row) for row in rows]
+        return pd.DataFrame(data)
