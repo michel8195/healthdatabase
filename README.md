@@ -19,6 +19,12 @@ A personal health data management and analysis system using SQLite to consolidat
 - Data validation and quality checks implemented
 - Average daily steps: 9,839 | Average daily calories: 625
 
+**🚀 Step 2 In Progress: Data Analysis & Visualization**
+- Jupyter notebook for interactive data exploration
+- Statistical analysis and correlation studies
+- Trend analysis with moving averages
+- Activity pattern identification
+
 ## 📁 Project Structure
 
 ```
@@ -58,4 +64,20 @@ healthdatabase/
 3. **Verify Database:**
    ```bash
    python3 scripts/verify_database.py
+   ```
+
+4. **Setup Analysis Environment (for data exploration):**
+   ```bash
+   # Create virtual environment
+   python3 -m venv venv
+   source venv/bin/activate  # On macOS/Linux
+   # or venv\Scripts\activate  # On Windows
+
+   # Install dependencies
+   pip install -r requirements.txt
+   ```
+
+5. **Start Jupyter Notebook for Analysis:**
+   ```bash
+   jupyter notebook notebooks/health_data_exploration.ipynb
    ```
