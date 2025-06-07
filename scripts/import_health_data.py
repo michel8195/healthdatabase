@@ -27,7 +27,7 @@ def import_data(data_type: str, source: str, file_path: Path,
     Import health data from a file.
 
     Args:
-        data_type: Type of data ('activity' or 'sleep')
+        data_type: Type of data ('activity', 'sleep', 'sport', or 'heart_rate')
         source: Data source ('zepp', etc.)
         file_path: Path to the data file
         dry_run: If True, validate but don't import
@@ -73,7 +73,7 @@ def main():
     )
     parser.add_argument(
         "data_type",
-        choices=['activity', 'sleep'],
+        choices=['activity', 'sleep', 'sport', 'heart_rate'],
         help="Type of data to import"
     )
     parser.add_argument(

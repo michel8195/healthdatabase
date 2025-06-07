@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 
 from src.etl.base_importer import CSVImporter, DataValidationError
-from src.database.models import ActivityModel, SleepModel, SportModel
+from src.database.models import ActivityModel, SleepModel, SportModel, HeartRateModel
 from src.database.connection import DatabaseConnection
 
 logger = logging.getLogger(__name__)
@@ -315,6 +315,141 @@ class ZeppSportImporter(CSVImporter):
             return None
 
 
+class ZeppHeartRateImporter(CSVImporter):
+    """Importer for Zepp heart rate data."""
+    
+    def __init__(self, db_connection: DatabaseConnection):
+        """Initialize Zepp heart rate importer."""
+        super().__init__(db_connection, HeartRateModel())
+    
+    def get_data_source_name(self) -> str:
+        """Return the data source name."""
+        return 'zepp'
+    
+    def transform_record(self, raw_record: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Transform Zepp heart rate record to standard format.
+        
+        Expected Zepp CSV formats:
+        1. Auto HR: date,time,heartRate (e.g., 2024-09-01,00:00,54)
+        2. Manual HR: time,heartRate (e.g., 2023-01-15 14:30:00+0000,75)
+        """
+        try:
+            # Handle different Zepp heart rate formats
+            if 'date' in raw_record and 'time' in raw_record:
+                # Format 1: Auto heart rate with separate date and time
+                date_str = raw_record.get('date', '').strip()
+                time_str = raw_record.get('time', '').strip()
+                
+                if not date_str or not time_str:
+                    raise ValueError("Date and time are required")
+                
+                # Combine date and time: "2024-09-01" + "00:00" -> "2024-09-01 00:00:00"
+                timestamp_str = f"{date_str} {time_str}:00"
+                timestamp = self._parse_combined_datetime(timestamp_str)
+                
+                heart_rate_field = 'heartRate'
+                
+            elif 'time' in raw_record:
+                # Format 2: Manual heart rate with full timestamp
+                timestamp = self._parse_heart_rate_timestamp(
+                    raw_record.get('time')
+                )
+                heart_rate_field = 'heartRate'
+                
+            else:
+                raise ValueError("No valid timestamp format found")
+            
+            # Get heart rate value
+            heart_rate = self._safe_int_conversion(
+                raw_record.get(heart_rate_field, 0)
+            )
+            
+            if heart_rate <= 0:
+                raise ValueError(f"Invalid heart rate value: {heart_rate}")
+            
+            return {
+                'timestamp': timestamp,
+                'heart_rate': heart_rate,
+                'resting_hr': None,  # Not available in Zepp auto data
+                'max_hr': None       # Not available in Zepp auto data
+            }
+            
+        except Exception as e:
+            logger.error(f"Error transforming heart rate record: {e}")
+            logger.debug(f"Raw record: {raw_record}")
+            raise ValueError(f"Invalid heart rate record format: {e}")
+    
+    def _parse_heart_rate_timestamp(self, timestamp_str: str) -> datetime:
+        """
+        Parse heart rate timestamp from Zepp format.
+        
+        Args:
+            timestamp_str: Timestamp string from Zepp (in UTC)
+            
+        Returns:
+            Parsed datetime object converted to GMT-3 or None if invalid
+        """
+        if not timestamp_str or timestamp_str.strip() == '':
+            raise ValueError("Timestamp is required for heart rate data")
+        
+        try:
+            # Handle Zepp timestamp format: "2025-05-18 15:18:00+0000"
+            clean_timestamp = timestamp_str.replace('+0000', '+00:00')
+            utc_datetime = datetime.fromisoformat(clean_timestamp)
+            
+            # Convert from UTC to GMT-3
+            gmt3_datetime = utc_datetime.astimezone(GMT_MINUS_3)
+            
+            logger.debug(
+                f"Converted heart rate timestamp {timestamp_str} from UTC to GMT-3: "
+                f"{utc_datetime} -> {gmt3_datetime}"
+            )
+            
+            return gmt3_datetime
+            
+        except Exception as e:
+            logger.error(f"Failed to parse heart rate timestamp '{timestamp_str}': {e}")
+            raise ValueError(f"Invalid timestamp format: {timestamp_str}")
+    
+    def _parse_combined_datetime(self, datetime_str: str) -> datetime:
+        """
+        Parse combined date and time string for heart rate data.
+        
+        Args:
+            datetime_str: Combined datetime string (e.g., "2024-09-01 00:00:00")
+            
+        Returns:
+            Parsed datetime object in GMT-3 timezone
+        """
+        if not datetime_str or datetime_str.strip() == '':
+            raise ValueError("Datetime string is required")
+        
+        try:
+            # Parse as naive datetime (assumes local time)
+            naive_datetime = datetime.strptime(datetime_str, '%Y-%m-%d %H:%M:%S')
+            
+            # Assume the data is already in GMT-3 (Brazilian time)
+            gmt3_datetime = naive_datetime.replace(tzinfo=GMT_MINUS_3)
+            
+            logger.debug(f"Parsed combined datetime '{datetime_str}' as GMT-3: {gmt3_datetime}")
+            
+            return gmt3_datetime
+            
+        except Exception as e:
+            logger.error(f"Failed to parse combined datetime '{datetime_str}': {e}")
+            raise ValueError(f"Invalid datetime format: {datetime_str}")
+    
+    def _safe_int_conversion(self, value: Any) -> int:
+        """Safely convert value to integer."""
+        if value is None or value == '':
+            return 0
+        try:
+            return int(float(value))
+        except (ValueError, TypeError):
+            return 0
+
+
 def create_zepp_importer(data_type: str,
                         db_connection: DatabaseConnection) -> CSVImporter:
     """
@@ -333,7 +468,8 @@ def create_zepp_importer(data_type: str,
     importers = {
         'activity': ZeppActivityImporter,
         'sleep': ZeppSleepImporter,
-        'sport': ZeppSportImporter
+        'sport': ZeppSportImporter,
+        'heart_rate': ZeppHeartRateImporter
     }
 
     if data_type not in importers:

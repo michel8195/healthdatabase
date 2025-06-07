@@ -80,6 +80,105 @@ def load_activity_data():
         return pd.DataFrame()
 
 @st.cache_data
+def load_heart_rate_data():
+    """Load heart rate data from database."""
+    try:
+        db = DatabaseConnection("data/health_data.db")
+        
+        query = """
+        SELECT 
+            timestamp,
+            heart_rate,
+            resting_hr,
+            max_hr,
+            data_source
+        FROM heart_rate_data 
+        WHERE timestamp >= datetime('now', '-3 years')
+        ORDER BY timestamp
+        """
+        
+        results = db.execute_query(query)
+        if not results:
+            return pd.DataFrame()
+        
+        # Convert sqlite3.Row objects to dictionaries
+        data = []
+        for row in results:
+            data.append(dict(row))
+        
+        df = pd.DataFrame(data)
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df['date'] = df['timestamp'].dt.date
+        
+        return df
+    except Exception as e:
+        st.error(f"Error loading heart rate data: {e}")
+        return pd.DataFrame()
+
+@st.cache_data
+def load_sport_data():
+    """Load sport data from database."""
+    try:
+        db = DatabaseConnection("data/health_data.db")
+        
+        query = """
+        SELECT 
+            start_time,
+            sport_type,
+            duration_seconds,
+            distance_meters,
+            calories,
+            avg_pace_per_meter,
+            data_source
+        FROM sport_data 
+        WHERE start_time >= datetime('now', '-3 years')
+        ORDER BY start_time
+        """
+        
+        results = db.execute_query(query)
+        if not results:
+            return pd.DataFrame()
+        
+        # Convert sqlite3.Row objects to dictionaries
+        data = []
+        for row in results:
+            data.append(dict(row))
+        
+        df = pd.DataFrame(data)
+        df['start_time'] = pd.to_datetime(df['start_time'])
+        df['date'] = df['start_time'].dt.date
+        
+        # Convert duration to minutes and distance to km
+        df['duration_minutes'] = df['duration_seconds'] / 60
+        df['distance_km'] = df['distance_meters'] / 1000
+        
+        # Add sport type labels
+        df['sport_name'] = df['sport_type'].map(get_sport_type_mapping())
+        
+        return df
+    except Exception as e:
+        st.error(f"Error loading sport data: {e}")
+        return pd.DataFrame()
+
+def get_sport_type_mapping():
+    """Get mapping of sport type codes to names."""
+    return {
+        1: 'Running',
+        6: 'Cycling', 
+        8: 'Swimming',
+        9: 'Walking',
+        10: 'Hiking',
+        17: 'Yoga',
+        21: 'Basketball',
+        22: 'Football',
+        42: 'Tennis',
+        52: 'Strength Training',
+        53: 'Fitness',
+        60: 'Elliptical',
+        105: 'Treadmill'
+    }
+
+@st.cache_data
 def load_sleep_data():
     """Load sleep data from database."""
     try:
@@ -401,6 +500,250 @@ def create_sleep_chart(df, metric, date_range, chart_type='line'):
     
     return fig
 
+def aggregate_heart_rate_daily(df):
+    """Aggregate heart rate data by day."""
+    if df.empty:
+        return pd.DataFrame()
+    
+    # Convert date to pandas datetime for grouping
+    df['date_dt'] = pd.to_datetime(df['date'])
+    
+    # Aggregate by date
+    daily_hr = df.groupby('date_dt').agg({
+        'heart_rate': ['mean', 'min', 'max', 'std'],
+        'resting_hr': 'mean',
+        'max_hr': 'mean',
+        'data_source': 'first'
+    }).reset_index()
+    
+    # Flatten column names
+    daily_hr.columns = ['date', 'avg_hr', 'min_hr', 'max_hr', 'hr_std', 'avg_resting_hr', 'avg_max_hr', 'data_source']
+    
+    return daily_hr
+
+def create_heart_rate_chart(df, metric, date_range, chart_type='line'):
+    """Create heart rate metric chart with moving averages or bar plots."""
+    if df.empty:
+        return None
+    
+    # Aggregate to daily data first
+    daily_df = aggregate_heart_rate_daily(df)
+    
+    if daily_df.empty:
+        return None
+    
+    # Filter data by date range
+    mask = (daily_df['date'] >= date_range[0]) & (daily_df['date'] <= date_range[1])
+    filtered_df = daily_df[mask].copy()
+    
+    if filtered_df.empty:
+        return None
+    
+    metric_labels = {
+        'avg_hr': 'Average Heart Rate (bpm)',
+        'min_hr': 'Minimum Heart Rate (bpm)',
+        'max_hr': 'Maximum Heart Rate (bpm)',
+        'hr_std': 'Heart Rate Variability (std)',
+        'avg_resting_hr': 'Average Resting HR (bpm)',
+        'avg_max_hr': 'Average Max HR (bpm)'
+    }
+    
+    if chart_type == 'line':
+        # Calculate moving averages
+        filtered_df = calculate_moving_averages(filtered_df, metric)
+        
+        # Create line chart
+        fig = go.Figure()
+        
+        # Daily values (lighter)
+        fig.add_trace(go.Scatter(
+            x=filtered_df['date'],
+            y=filtered_df[metric],
+            mode='lines',
+            name='Daily',
+            line=dict(color='lightcoral', width=1),
+            opacity=0.6
+        ))
+        
+        # 7-day moving average
+        fig.add_trace(go.Scatter(
+            x=filtered_df['date'],
+            y=filtered_df[f'{metric}_ma7'],
+            mode='lines',
+            name='7-day MA',
+            line=dict(color='orange', width=2)
+        ))
+        
+        # 30-day moving average
+        fig.add_trace(go.Scatter(
+            x=filtered_df['date'],
+            y=filtered_df[f'{metric}_ma30'],
+            mode='lines',
+            name='30-day MA',
+            line=dict(color='red', width=2)
+        ))
+        
+        fig.update_layout(
+            title=f"{metric_labels.get(metric, metric).title()} Over Time",
+            xaxis_title="Date",
+            yaxis_title=metric_labels.get(metric, metric),
+            hovermode='x unified',
+            height=400
+        )
+        
+    else:  # bar chart
+        # Create aggregated data based on chart_type
+        if chart_type == 'week':
+            filtered_df['period'] = filtered_df['date'].dt.to_period('W-MON')  # Week starting Monday
+            period_label = "Week"
+            date_format = lambda x: f"Week of {x.start_time.strftime('%Y-%m-%d')}"
+        elif chart_type == 'month':
+            filtered_df['period'] = filtered_df['date'].dt.to_period('M')
+            period_label = "Month"
+            date_format = lambda x: x.strftime('%Y-%m')
+        elif chart_type == 'quarter':
+            filtered_df['period'] = filtered_df['date'].dt.to_period('Q')
+            period_label = "Quarter"
+            date_format = lambda x: f"Q{x.quarter} {x.year}"
+        
+        # Calculate averages per period
+        agg_data = filtered_df.groupby('period')[metric].mean().reset_index()
+        agg_data['period_label'] = agg_data['period'].apply(date_format)
+        
+        # Create bar chart
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            x=agg_data['period_label'],
+            y=agg_data[metric],
+            name=f'Average {metric_labels.get(metric, metric)}',
+            marker_color='crimson',
+            text=[f'{val:.0f}' for val in agg_data[metric]],
+            textposition='outside'
+        ))
+        
+        fig.update_layout(
+            title=f"Average {metric_labels.get(metric, metric).title()} per {period_label}",
+            xaxis_title=period_label,
+            yaxis_title=f"Average {metric_labels.get(metric, metric)}",
+            height=400,
+            xaxis={'tickangle': 45}
+        )
+    
+    return fig
+
+def analyze_sport_data_by_period(df, period='weekly'):
+    """Analyze sport data by time period showing activity counts and total time."""
+    if df.empty:
+        return pd.DataFrame()
+    
+    # Convert start_time to datetime if needed
+    df['start_time'] = pd.to_datetime(df['start_time'])
+    
+    if period == 'weekly':
+        df['period'] = df['start_time'].dt.to_period('W-MON')
+        period_label = "Week"
+    elif period == 'monthly':
+        df['period'] = df['start_time'].dt.to_period('M')
+        period_label = "Month"
+    else:
+        raise ValueError("Period must be 'weekly' or 'monthly'")
+    
+    # Group by period and sport type
+    analysis = df.groupby(['period', 'sport_name']).agg({
+        'start_time': 'count',  # Number of activities
+        'duration_minutes': 'sum',  # Total time
+        'distance_km': 'sum',  # Total distance
+        'calories': 'sum'  # Total calories
+    }).reset_index()
+    
+    # Rename columns for clarity
+    analysis.columns = ['period', 'sport_name', 'activity_count', 'total_time_minutes', 'total_distance_km', 'total_calories']
+    
+    # Convert time to hours for better readability
+    analysis['total_time_hours'] = analysis['total_time_minutes'] / 60
+    
+    # Format period labels
+    if period == 'weekly':
+        analysis['period_label'] = analysis['period'].apply(lambda x: f"Week of {x.start_time.strftime('%Y-%m-%d')}")
+    else:
+        analysis['period_label'] = analysis['period'].apply(lambda x: x.strftime('%Y-%m'))
+    
+    return analysis
+
+def create_sport_activity_chart(df, metric='activity_count', period='weekly'):
+    """Create sport activity chart showing counts or time by sport type."""
+    if df.empty:
+        return None
+    
+    analysis = analyze_sport_data_by_period(df, period)
+    
+    if analysis.empty:
+        return None
+    
+    period_label = "Weekly" if period == 'weekly' else "Monthly"
+    
+    if metric == 'activity_count':
+        title = f"{period_label} Activity Count by Sport Type"
+        y_title = "Number of Activities"
+        value_col = 'activity_count'
+        text_format = lambda x: f'{int(x)}'
+    else:  # total_time_hours
+        title = f"{period_label} Total Time by Sport Type"
+        y_title = "Total Time (hours)"
+        value_col = 'total_time_hours'
+        text_format = lambda x: f'{x:.1f}h'
+    
+    # Create stacked bar chart
+    fig = go.Figure()
+    
+    # Get unique periods and sport types
+    periods = analysis['period_label'].unique()
+    sport_types = analysis['sport_name'].unique()
+    
+    # Create a bar for each sport type
+    colors = px.colors.qualitative.Set3
+    for i, sport in enumerate(sport_types):
+        sport_data = analysis[analysis['sport_name'] == sport]
+        
+        # Create full period series with zeros for missing periods
+        full_data = []
+        full_periods = []
+        for period in periods:
+            period_value = sport_data[sport_data['period_label'] == period][value_col]
+            if len(period_value) > 0:
+                full_data.append(period_value.iloc[0])
+            else:
+                full_data.append(0)
+            full_periods.append(period)
+        
+        fig.add_trace(go.Bar(
+            name=sport,
+            x=full_periods,
+            y=full_data,
+            text=[text_format(val) if val > 0 else '' for val in full_data],
+            textposition='inside',
+            marker_color=colors[i % len(colors)]
+        ))
+    
+    fig.update_layout(
+        title=title,
+        xaxis_title=f"{period_label.split()[0]} Period",
+        yaxis_title=y_title,
+        barmode='stack',
+        height=500,
+        xaxis={'tickangle': 45},
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    return fig
+
 def main():
     """Main dashboard application."""
     st.title("📊 Health Data Analytics Dashboard")
@@ -410,18 +753,26 @@ def main():
     with st.spinner("Loading data..."):
         activity_df = load_activity_data()
         sleep_df = load_sleep_data()
+        heart_rate_df = load_heart_rate_data()
+        sport_df = load_sport_data()
     
     # Debug information
     st.sidebar.header("🔍 Data Debug Info")
     st.sidebar.write(f"Activity records: {len(activity_df)}")
     st.sidebar.write(f"Sleep records: {len(sleep_df)}")
+    st.sidebar.write(f"Heart rate records: {len(heart_rate_df)}")
+    st.sidebar.write(f"Sport records: {len(sport_df)}")
     
     if not activity_df.empty:
         st.sidebar.write(f"Activity date range: {activity_df['date'].min().date()} to {activity_df['date'].max().date()}")
     if not sleep_df.empty:
         st.sidebar.write(f"Sleep date range: {sleep_df['date'].min().date()} to {sleep_df['date'].max().date()}")
+    if not heart_rate_df.empty:
+        st.sidebar.write(f"Heart rate date range: {heart_rate_df['date'].min()} to {heart_rate_df['date'].max()}")
+    if not sport_df.empty:
+        st.sidebar.write(f"Sport date range: {sport_df['date'].min()} to {sport_df['date'].max()}")
     
-    if activity_df.empty and sleep_df.empty:
+    if activity_df.empty and sleep_df.empty and heart_rate_df.empty and sport_df.empty:
         st.error("No data found. Please ensure your database contains data.")
         st.info("Run the import scripts to populate your database with health data.")
         
@@ -446,6 +797,10 @@ def main():
         all_dates.extend(activity_df['date'].tolist())
     if not sleep_df.empty:
         all_dates.extend(sleep_df['date'].tolist())
+    if not heart_rate_df.empty:
+        all_dates.extend(pd.to_datetime(heart_rate_df['date']).tolist())
+    if not sport_df.empty:
+        all_dates.extend(pd.to_datetime(sport_df['date']).tolist())
     
     if not all_dates:
         st.error("No valid dates found in the data.")
@@ -479,6 +834,10 @@ def main():
         all_sources.update(activity_df['data_source'].unique())
     if not sleep_df.empty:
         all_sources.update(sleep_df['data_source'].unique())
+    if not heart_rate_df.empty:
+        all_sources.update(heart_rate_df['data_source'].unique())
+    if not sport_df.empty:
+        all_sources.update(sport_df['data_source'].unique())
     
     selected_sources = st.sidebar.multiselect(
         "Filter by data source",
@@ -506,6 +865,10 @@ def main():
             activity_df = activity_df[activity_df['data_source'].isin(selected_sources)]
         if not sleep_df.empty:
             sleep_df = sleep_df[sleep_df['data_source'].isin(selected_sources)]
+        if not heart_rate_df.empty:
+            heart_rate_df = heart_rate_df[heart_rate_df['data_source'].isin(selected_sources)]
+        if not sport_df.empty:
+            sport_df = sport_df[sport_df['data_source'].isin(selected_sources)]
     
     # Summary statistics
     st.header("📈 Summary Statistics")
@@ -526,6 +889,19 @@ def main():
         ]
     else:
         sleep_summary = pd.DataFrame()
+    
+    if not heart_rate_df.empty:
+        # Aggregate heart rate to daily for summary
+        hr_daily = aggregate_heart_rate_daily(heart_rate_df)
+        if not hr_daily.empty:
+            hr_summary = hr_daily[
+                (hr_daily['date'] >= start_date) & 
+                (hr_daily['date'] <= end_date)
+            ]
+        else:
+            hr_summary = pd.DataFrame()
+    else:
+        hr_summary = pd.DataFrame()
     
     # Display metrics
     col1, col2, col3, col4 = st.columns(4)
@@ -552,11 +928,51 @@ def main():
             st.metric("Avg Sleep Hours", "No data")
     
     with col4:
-        if not sleep_summary.empty:
-            avg_efficiency = sleep_summary['sleep_efficiency'].mean()
-            st.metric("Avg Sleep Efficiency", f"{avg_efficiency:.1f}%")
+        if not hr_summary.empty:
+            avg_hr = hr_summary['avg_hr'].mean()
+            st.metric("Avg Heart Rate", f"{avg_hr:.0f} bpm")
         else:
-            st.metric("Avg Sleep Efficiency", "No data")
+            st.metric("Avg Heart Rate", "No data")
+    
+    # Additional heart rate metrics if available
+    if not hr_summary.empty:
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            avg_resting = hr_summary['avg_resting_hr'].mean()
+            if not pd.isna(avg_resting):
+                st.metric("Avg Resting HR", f"{avg_resting:.0f} bpm")
+            else:
+                st.metric("Avg Resting HR", "No data")
+        
+        with col2:
+            avg_max = hr_summary['avg_max_hr'].mean()
+            if not pd.isna(avg_max):
+                st.metric("Avg Max HR", f"{avg_max:.0f} bpm")
+            else:
+                st.metric("Avg Max HR", "No data")
+        
+        with col3:
+            if not sleep_summary.empty:
+                avg_efficiency = sleep_summary['sleep_efficiency'].mean()
+                st.metric("Avg Sleep Efficiency", f"{avg_efficiency:.1f}%")
+            else:
+                st.metric("Avg Sleep Efficiency", "No data")
+        
+        with col4:
+            avg_variability = hr_summary['hr_std'].mean()
+            if not pd.isna(avg_variability):
+                st.metric("HR Variability", f"{avg_variability:.1f}")
+            else:
+                st.metric("HR Variability", "No data")
+    else:
+        # Show sleep efficiency in original location if no HR data
+        if not sleep_summary.empty:
+            st.columns(3)  # spacer
+            col4 = st.columns(1)[0]
+            with col4:
+                avg_efficiency = sleep_summary['sleep_efficiency'].mean()
+                st.metric("Avg Sleep Efficiency", f"{avg_efficiency:.1f}%")
     
     # Chart type description
     if chart_type == 'line':
@@ -597,6 +1013,102 @@ def main():
                 else:
                     st.info("No data available for the selected date range.")
     
+    # Heart Rate Data Visualization
+    if not heart_rate_df.empty:
+        st.header("❤️ Heart Rate Data")
+        
+        heart_rate_tabs = st.tabs(["Average HR", "Min HR", "Max HR", "HR Variability", "Resting HR", "Max HR Daily"])
+        
+        heart_rate_metrics = ['avg_hr', 'min_hr', 'max_hr', 'hr_std', 'avg_resting_hr', 'avg_max_hr']
+        
+        for tab, metric in zip(heart_rate_tabs, heart_rate_metrics):
+            with tab:
+                fig = create_heart_rate_chart(heart_rate_df, metric, (start_date, end_date), chart_type)
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No data available for the selected date range.")
+    
+    # Sport Data Visualization
+    if not sport_df.empty:
+        st.header("🏃 Sport Data Analysis")
+        
+        # Filter sport data by date range
+        sport_filtered = sport_df[
+            (sport_df['date'] >= start_date.date()) & 
+            (sport_df['date'] <= end_date.date())
+        ]
+        
+        if not sport_filtered.empty:
+            # Sport analysis controls
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                sport_period = st.selectbox(
+                    "Analysis Period",
+                    options=['weekly', 'monthly'],
+                    format_func=lambda x: f"{'📅 Weekly' if x == 'weekly' else '📊 Monthly'} Analysis",
+                    index=0,
+                    key="sport_period"
+                )
+            
+            with col2:
+                sport_metric = st.selectbox(
+                    "Metric",
+                    options=['activity_count', 'total_time_hours'],
+                    format_func=lambda x: f"{'🔢 Activity Count' if x == 'activity_count' else '⏱️ Total Time'} per Sport",
+                    index=0,
+                    key="sport_metric"
+                )
+            
+            # Create sport activity chart
+            sport_fig = create_sport_activity_chart(sport_filtered, sport_metric, sport_period)
+            if sport_fig:
+                st.plotly_chart(sport_fig, use_container_width=True)
+                
+                # Sport summary statistics
+                sport_analysis = analyze_sport_data_by_period(sport_filtered, sport_period)
+                if not sport_analysis.empty:
+                    st.subheader(f"📊 {sport_period.capitalize()} Sport Summary")
+                    
+                    # Overall stats
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        total_activities = sport_analysis['activity_count'].sum()
+                        st.metric("Total Activities", f"{total_activities:,}")
+                    
+                    with col2:
+                        total_time = sport_analysis['total_time_hours'].sum()
+                        st.metric("Total Time", f"{total_time:.1f}h")
+                    
+                    with col3:
+                        unique_sports = sport_analysis['sport_name'].nunique()
+                        st.metric("Sport Types", f"{unique_sports}")
+                    
+                    with col4:
+                        avg_duration = sport_filtered['duration_minutes'].mean()
+                        st.metric("Avg Activity Duration", f"{avg_duration:.0f} min")
+                    
+                    # Top sports by activity count and time
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.subheader("🏆 Most Frequent Sports")
+                        sport_counts = sport_analysis.groupby('sport_name')['activity_count'].sum().sort_values(ascending=False).head(5)
+                        for sport, count in sport_counts.items():
+                            st.write(f"**{sport}:** {count} activities")
+                    
+                    with col2:
+                        st.subheader("⏱️ Most Time Spent")
+                        sport_time = sport_analysis.groupby('sport_name')['total_time_hours'].sum().sort_values(ascending=False).head(5)
+                        for sport, time in sport_time.items():
+                            st.write(f"**{sport}:** {time:.1f} hours")
+            else:
+                st.info("No sport data available for the selected date range.")
+        else:
+            st.info("No sport data available for the selected date range and filters.")
+    
     # Correlation Analysis
     if not activity_df.empty and not sleep_df.empty:
         st.header("🔗 Correlation Analysis")
@@ -608,6 +1120,17 @@ def main():
             on='date',
             how='inner'
         )
+        
+        # Add heart rate data if available
+        if not heart_rate_df.empty:
+            hr_daily = aggregate_heart_rate_daily(heart_rate_df)
+            if not hr_daily.empty:
+                merged_df = pd.merge(
+                    merged_df,
+                    hr_daily[['date', 'avg_hr', 'avg_resting_hr', 'hr_std']],
+                    on='date',
+                    how='left'
+                )
         
         # Filter by date range and remove invalid sleep data
         merged_df = merged_df[
@@ -710,14 +1233,32 @@ def main():
                         'Active Minutes vs Avg Sleep': corr_df['active_minutes'].corr(corr_df['total_sleep_hours']),
                         'Calories vs Avg Sleep': corr_df['calories'].corr(corr_df['total_sleep_hours'])
                     }
+                    
+                    # Add heart rate correlations if available
+                    if 'avg_hr' in corr_df.columns:
+                        hr_correlations = {
+                            'Steps vs Avg HR': corr_df['steps'].corr(corr_df['avg_hr']),
+                            'Sleep vs Avg HR': corr_df['total_sleep_hours'].corr(corr_df['avg_hr']),
+                            'Sleep vs Resting HR': corr_df['total_sleep_hours'].corr(corr_df['avg_resting_hr']) if 'avg_resting_hr' in corr_df.columns else None,
+                            'Steps vs HR Variability': corr_df['steps'].corr(corr_df['hr_std']) if 'hr_std' in corr_df.columns else None
+                        }
+                        correlations.update({k: v for k, v in hr_correlations.items() if v is not None and not pd.isna(v)})
                 else:
                     st.warning("Not enough data points after outlier filtering.")
                     return
                 
                 # Display correlation metrics
-                col1, col2, col3 = st.columns(3)
+                num_cols = min(4, len([k for k, v in correlations.items() if not pd.isna(v)]))
+                if num_cols == 0:
+                    st.warning("No valid correlations could be calculated.")
+                    return
                 
-                with col1:
+                # Create dynamic columns based on available correlations
+                cols = st.columns(num_cols)
+                col_idx = 0
+                
+                # Primary correlations
+                with cols[col_idx]:
                     steps_sleep_corr = correlations['Steps vs Avg Sleep']
                     if not pd.isna(steps_sleep_corr):
                         sleep_label = "Avg Sleep Hours" if corr_aggregation != 'daily' else "Sleep Hours"
@@ -726,23 +1267,41 @@ def main():
                             f"{steps_sleep_corr:.3f}",
                             help="Correlation coefficient (-1 to 1). Values closer to ±1 indicate stronger relationships."
                         )
-                    else:
-                        st.metric("Steps ↔ Avg Sleep", "N/A")
+                        col_idx += 1
                 
-                with col2:
-                    steps_efficiency_corr = correlations['Steps vs Sleep Efficiency']
-                    if not pd.isna(steps_efficiency_corr):
-                        st.metric("Steps ↔ Sleep Efficiency", f"{steps_efficiency_corr:.3f}")
-                    else:
-                        st.metric("Steps ↔ Sleep Efficiency", "N/A")
+                if col_idx < num_cols:
+                    with cols[col_idx]:
+                        steps_efficiency_corr = correlations['Steps vs Sleep Efficiency']
+                        if not pd.isna(steps_efficiency_corr):
+                            st.metric("Steps ↔ Sleep Efficiency", f"{steps_efficiency_corr:.3f}")
+                            col_idx += 1
                 
-                with col3:
-                    active_sleep_corr = correlations['Active Minutes vs Avg Sleep']
-                    if not pd.isna(active_sleep_corr):
-                        sleep_label = "Avg Sleep Hours" if corr_aggregation != 'daily' else "Sleep Hours"
-                        st.metric(f"Active Minutes ↔ {sleep_label}", f"{active_sleep_corr:.3f}")
-                    else:
-                        st.metric("Active Minutes ↔ Avg Sleep", "N/A")
+                if col_idx < num_cols:
+                    with cols[col_idx]:
+                        active_sleep_corr = correlations['Active Minutes vs Avg Sleep']
+                        if not pd.isna(active_sleep_corr):
+                            sleep_label = "Avg Sleep Hours" if corr_aggregation != 'daily' else "Sleep Hours"
+                            st.metric(f"Active Minutes ↔ {sleep_label}", f"{active_sleep_corr:.3f}")
+                            col_idx += 1
+                
+                # Heart rate correlations if available
+                if col_idx < num_cols and 'Steps vs Avg HR' in correlations:
+                    with cols[col_idx]:
+                        steps_hr_corr = correlations['Steps vs Avg HR']
+                        if not pd.isna(steps_hr_corr):
+                            st.metric("Steps ↔ Avg HR", f"{steps_hr_corr:.3f}")
+                            col_idx += 1
+                
+                # Additional heart rate correlations in a new row if needed
+                hr_corrs = {k: v for k, v in correlations.items() if 'HR' in k and k != 'Steps vs Avg HR' and not pd.isna(v)}
+                if hr_corrs:
+                    st.subheader("❤️ Heart Rate Correlations")
+                    hr_cols = st.columns(min(3, len(hr_corrs)))
+                    for idx, (name, corr) in enumerate(hr_corrs.items()):
+                        if idx < len(hr_cols):
+                            with hr_cols[idx]:
+                                display_name = name.replace('vs', '↔')
+                                st.metric(display_name, f"{corr:.3f}")
                 
                 # Scatter plot for steps vs sleep
                 sleep_unit = "hours" if corr_aggregation != 'daily' else "hours"
@@ -898,7 +1457,7 @@ def main():
     
     # Data Export
     st.header("📥 Data Export")
-    col1, col2 = st.columns(2)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         if not activity_df.empty:
@@ -917,6 +1476,26 @@ def main():
                 label="Download Sleep Data (CSV)",
                 data=sleep_csv,
                 file_name=f"sleep_data_{date_range[0]}_{date_range[1]}.csv",
+                mime="text/csv"
+            )
+    
+    with col3:
+        if not heart_rate_df.empty:
+            hr_csv = heart_rate_df.to_csv(index=False)
+            st.download_button(
+                label="Download Heart Rate Data (CSV)",
+                data=hr_csv,
+                file_name=f"heart_rate_data_{date_range[0]}_{date_range[1]}.csv",
+                mime="text/csv"
+            )
+    
+    with col4:
+        if not sport_df.empty:
+            sport_csv = sport_df.to_csv(index=False)
+            st.download_button(
+                label="Download Sport Data (CSV)",
+                data=sport_csv,
+                file_name=f"sport_data_{date_range[0]}_{date_range[1]}.csv",
                 mime="text/csv"
             )
     
