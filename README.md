@@ -105,6 +105,28 @@ python scripts/verify_new_database.py
 
 ### 5. Analyze Your Data
 
+#### Interactive Web Dashboard
+Launch the interactive web dashboard for comprehensive data visualization:
+
+```bash
+# Quick start with launcher script
+python run_dashboard.py
+
+# Or run directly with Streamlit
+streamlit run app.py
+```
+
+The dashboard provides:
+- **📊 Interactive Charts**: Daily values with 7-day and 30-day moving averages
+- **📈 Bar Charts**: Weekly, monthly, and quarterly aggregations
+- **🔗 Correlation Analysis**: Activity vs sleep relationships at different time scales
+- **🎯 Outlier Detection**: Identify and optionally exclude statistical outliers
+- **📅 Date Range Selection**: Focus on specific time periods
+- **📥 Data Export**: Download filtered data as CSV
+
+#### Jupyter Notebooks
+For detailed analysis and custom exploration:
+
 ```bash
 # Start Jupyter for analysis
 jupyter notebook notebooks/health_data_exploration.ipynb
@@ -144,10 +166,11 @@ graph LR
 - **`bulk_importer.py`**: Advanced bulk import system with duplicate handling
 - **Extensible**: Easy to add new source importers
 
-### Analysis Layer (`notebooks/`)
-- **Jupyter Notebooks**: Interactive data exploration and visualization
-- **Statistical Analysis**: Trends, correlations, and insights
-- **Visualization**: Charts, graphs, and dashboards
+### Analysis Layer (`notebooks/` & `app.py`)
+- **Interactive Web Dashboard**: Streamlit-based UI with real-time visualizations
+- **Jupyter Notebooks**: Interactive data exploration and custom analysis
+- **Statistical Analysis**: Trends, correlations, and insights with outlier detection
+- **Visualization**: Charts, graphs, and interactive dashboards
 
 📚 **For detailed architecture documentation and diagrams, see [docs/architecture.md](docs/architecture.md)**
 
@@ -269,6 +292,8 @@ healthdatabase/
 │   └── utils/            # Utilities and configuration
 ├── scripts/              # Command-line tools
 ├── notebooks/            # Jupyter analysis notebooks
+├── app.py                # Interactive web dashboard
+├── run_dashboard.py      # Dashboard launcher script
 ├── data/                 # Database and raw data files
 └── raw/                  # Raw data from devices
 ```
@@ -316,15 +341,25 @@ python scripts/import_health_data.py activity data.csv --dry-run --verbose
 python scripts/verify_new_database.py
 ```
 
-## Data Analysis Examples
+## Data Analysis & Visualization
 
-The system includes comprehensive Jupyter notebooks for:
+The system provides multiple ways to analyze your health data:
 
-- **Time Series Analysis**: Daily, weekly, monthly trends
-- **Correlation Analysis**: Relationships between sleep and activity
+### Interactive Web Dashboard
+- **Time Series Analysis**: Daily values with 7-day and 30-day moving averages
+- **Period Aggregations**: Weekly, monthly, and quarterly bar charts
+- **Advanced Correlation Analysis**: 
+  - Daily, weekly, and monthly activity vs sleep relationships
+  - Outlier detection using IQR method (1.5 × IQR beyond Q1/Q3)
+  - Option to include/exclude outliers from correlation calculations
+  - Visual outlier identification (red diamond markers)
+- **Sleep Timing Analysis**: Bed time and wake time patterns
+- **Data Export**: CSV downloads with date filtering
+
+### Jupyter Notebooks
 - **Goal Tracking**: Progress towards health targets
 - **Comparative Analysis**: Period-over-period comparisons
-- **Visualization**: Interactive charts and dashboards
+- **Custom Analysis**: Flexible data exploration and visualization
 
 ## Contributing
 
@@ -345,17 +380,21 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Modular, extensible architecture
 - Multi-table database schema with proper relationships
 - Zepp activity and sleep data import
+- Sport data import with timezone conversion
 - Data validation and error handling
+- Interactive web dashboard with Streamlit
+- Advanced correlation analysis with outlier detection
 - Comprehensive analysis notebooks
 - Command-line tools for all operations
+- Bulk import system with duplicate handling
+- Comprehensive testing framework with pytest
 
 🚧 **In Progress**:
 - Heart rate data import (schema ready)
 - Additional data source support
-- Advanced analytics features
+- Machine learning insights
 
 🔮 **Planned**:
-- Web dashboard interface
 - Real-time data sync
-- Machine learning insights
-- Export capabilities
+- Mobile app integration
+- Advanced predictive analytics
