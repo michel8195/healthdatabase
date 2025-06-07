@@ -273,10 +273,13 @@ class ZeppSportImporter(CSVImporter):
 
     def _safe_pace_conversion(self, value: Any) -> float:
         """Safely convert pace value, treating -1.0 as invalid."""
-        if value is None or value == '' or value == -1.0:
+        if value is None or value == '':
             return 0.0
         try:
-            return float(value)
+            float_val = float(value)
+            if float_val == -1.0:
+                return 0.0
+            return float_val
         except (ValueError, TypeError):
             return 0.0
 

@@ -10,7 +10,7 @@ from typing import List, Dict, Tuple, Any
 from datetime import datetime
 
 from .zepp_importers import create_zepp_importer
-from ..database import DatabaseConnection
+from ..database.connection import DatabaseConnection
 
 
 logger = logging.getLogger(__name__)

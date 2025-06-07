@@ -51,12 +51,43 @@ jupyter notebook notebooks/health_data_exploration.ipynb
 python create_sleep_chart.py
 ```
 
+### Testing
+```bash
+# Run all tests
+pytest
+
+# Run tests with coverage report
+pytest --cov=src
+
+# Run only unit tests
+pytest -m unit
+
+# Run only integration tests
+pytest -m integration
+
+# Run only database tests
+pytest -m database
+
+# Run tests excluding slow tests
+pytest -m "not slow"
+
+# Run specific test file
+pytest tests/test_models.py
+
+# Run with verbose output
+pytest -v
+
+# Run tests and stop on first failure
+pytest -x
+```
+
 ### Development Dependencies
 ```bash
 # Install all dependencies
 pip install -r requirements.txt
 
 # Core analysis tools: pandas, matplotlib, seaborn, numpy, jupyter
+# Testing tools: pytest, pytest-cov
 # No external dependencies for core database functionality (uses Python stdlib)
 ```
 

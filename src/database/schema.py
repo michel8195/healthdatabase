@@ -39,7 +39,7 @@ class SchemaManager:
 
             with self.db_connection.get_cursor() as cursor:
                 # Create tables in dependency order
-                creation_order = ['users', 'activity', 'sleep', 'heart_rate']
+                creation_order = ['users', 'activity', 'sleep', 'sport', 'heart_rate']
 
                 for model_name in creation_order:
                     if model_name in self.models:
@@ -63,6 +63,12 @@ class SchemaManager:
             logger.error(f"Failed to create database schema: {e}")
             return False
 
+    def create_table(self, model: BaseModel) -> None:
+        """Create a single table."""
+        with self.db_connection.get_cursor() as cursor:
+            self._create_table(cursor, model)
+            self._create_indexes(cursor, model)
+
     def _create_table(self, cursor, model: BaseModel) -> None:
         """Create a single table."""
         table_name = model.get_table_name()
@@ -83,7 +89,7 @@ class SchemaManager:
     def _create_update_triggers(self, cursor) -> None:
         """Create update triggers for timestamp management."""
         tables_with_timestamps = [
-            'users', 'daily_activity', 'sleep_data', 'heart_rate_data'
+            'users', 'daily_activity', 'sleep_data', 'sport_data', 'heart_rate_data'
         ]
 
         for table_name in tables_with_timestamps:
