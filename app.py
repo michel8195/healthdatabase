@@ -134,8 +134,8 @@ def calculate_moving_averages(df, column, date_col='date'):
     
     return df
 
-def create_activity_chart(df, metric, date_range):
-    """Create activity metric chart with moving averages."""
+def create_activity_chart(df, metric, date_range, chart_type='line'):
+    """Create activity metric chart with moving averages or bar plots."""
     if df.empty:
         return None
     
@@ -146,41 +146,6 @@ def create_activity_chart(df, metric, date_range):
     if filtered_df.empty:
         return None
     
-    # Calculate moving averages
-    filtered_df = calculate_moving_averages(filtered_df, metric)
-    
-    # Create chart
-    fig = go.Figure()
-    
-    # Daily values (lighter)
-    fig.add_trace(go.Scatter(
-        x=filtered_df['date'],
-        y=filtered_df[metric],
-        mode='lines',
-        name='Daily',
-        line=dict(color='lightblue', width=1),
-        opacity=0.6
-    ))
-    
-    # 7-day moving average
-    fig.add_trace(go.Scatter(
-        x=filtered_df['date'],
-        y=filtered_df[f'{metric}_ma7'],
-        mode='lines',
-        name='7-day MA',
-        line=dict(color='orange', width=2)
-    ))
-    
-    # 30-day moving average
-    fig.add_trace(go.Scatter(
-        x=filtered_df['date'],
-        y=filtered_df[f'{metric}_ma30'],
-        mode='lines',
-        name='30-day MA',
-        line=dict(color='red', width=2)
-    ))
-    
-    # Customize layout
     metric_labels = {
         'steps': 'Steps',
         'calories': 'Calories',
@@ -189,18 +154,92 @@ def create_activity_chart(df, metric, date_range):
         'active_minutes': 'Active Minutes'
     }
     
-    fig.update_layout(
-        title=f"{metric_labels.get(metric, metric).title()} Over Time",
-        xaxis_title="Date",
-        yaxis_title=metric_labels.get(metric, metric),
-        hovermode='x unified',
-        height=400
-    )
+    if chart_type == 'line':
+        # Calculate moving averages
+        filtered_df = calculate_moving_averages(filtered_df, metric)
+        
+        # Create line chart
+        fig = go.Figure()
+        
+        # Daily values (lighter)
+        fig.add_trace(go.Scatter(
+            x=filtered_df['date'],
+            y=filtered_df[metric],
+            mode='lines',
+            name='Daily',
+            line=dict(color='lightblue', width=1),
+            opacity=0.6
+        ))
+        
+        # 7-day moving average
+        fig.add_trace(go.Scatter(
+            x=filtered_df['date'],
+            y=filtered_df[f'{metric}_ma7'],
+            mode='lines',
+            name='7-day MA',
+            line=dict(color='orange', width=2)
+        ))
+        
+        # 30-day moving average
+        fig.add_trace(go.Scatter(
+            x=filtered_df['date'],
+            y=filtered_df[f'{metric}_ma30'],
+            mode='lines',
+            name='30-day MA',
+            line=dict(color='red', width=2)
+        ))
+        
+        fig.update_layout(
+            title=f"{metric_labels.get(metric, metric).title()} Over Time",
+            xaxis_title="Date",
+            yaxis_title=metric_labels.get(metric, metric),
+            hovermode='x unified',
+            height=400
+        )
+        
+    else:  # bar chart
+        # Create aggregated data based on chart_type
+        if chart_type == 'week':
+            filtered_df['period'] = filtered_df['date'].dt.to_period('W-MON')  # Week starting Monday
+            period_label = "Week"
+            date_format = lambda x: f"Week of {x.start_time.strftime('%Y-%m-%d')}"
+        elif chart_type == 'month':
+            filtered_df['period'] = filtered_df['date'].dt.to_period('M')
+            period_label = "Month"
+            date_format = lambda x: x.strftime('%Y-%m')
+        elif chart_type == 'quarter':
+            filtered_df['period'] = filtered_df['date'].dt.to_period('Q')
+            period_label = "Quarter"
+            date_format = lambda x: f"Q{x.quarter} {x.year}"
+        
+        # Calculate averages per period
+        agg_data = filtered_df.groupby('period')[metric].mean().reset_index()
+        agg_data['period_label'] = agg_data['period'].apply(date_format)
+        
+        # Create bar chart
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            x=agg_data['period_label'],
+            y=agg_data[metric],
+            name=f'Average {metric_labels.get(metric, metric)}',
+            marker_color='steelblue',
+            text=[f'{val:.0f}' for val in agg_data[metric]],
+            textposition='outside'
+        ))
+        
+        fig.update_layout(
+            title=f"Average {metric_labels.get(metric, metric).title()} per {period_label}",
+            xaxis_title=period_label,
+            yaxis_title=f"Average {metric_labels.get(metric, metric)}",
+            height=400,
+            xaxis={'tickangle': 45}
+        )
     
     return fig
 
-def create_sleep_chart(df, metric, date_range):
-    """Create sleep metric chart with moving averages."""
+def create_sleep_chart(df, metric, date_range, chart_type='line'):
+    """Create sleep metric chart with moving averages or bar plots."""
     if df.empty:
         return None
     
@@ -211,41 +250,6 @@ def create_sleep_chart(df, metric, date_range):
     if filtered_df.empty:
         return None
     
-    # Calculate moving averages
-    filtered_df = calculate_moving_averages(filtered_df, metric)
-    
-    # Create chart
-    fig = go.Figure()
-    
-    # Daily values (lighter)
-    fig.add_trace(go.Scatter(
-        x=filtered_df['date'],
-        y=filtered_df[metric],
-        mode='lines',
-        name='Daily',
-        line=dict(color='lightblue', width=1),
-        opacity=0.6
-    ))
-    
-    # 7-day moving average
-    fig.add_trace(go.Scatter(
-        x=filtered_df['date'],
-        y=filtered_df[f'{metric}_ma7'],
-        mode='lines',
-        name='7-day MA',
-        line=dict(color='orange', width=2)
-    ))
-    
-    # 30-day moving average
-    fig.add_trace(go.Scatter(
-        x=filtered_df['date'],
-        y=filtered_df[f'{metric}_ma30'],
-        mode='lines',
-        name='30-day MA',
-        line=dict(color='red', width=2)
-    ))
-    
-    # Customize layout
     metric_labels = {
         'total_sleep_hours': 'Total Sleep (hours)',
         'deep_sleep_hours': 'Deep Sleep (hours)',
@@ -254,13 +258,98 @@ def create_sleep_chart(df, metric, date_range):
         'sleep_efficiency': 'Sleep Efficiency (%)'
     }
     
-    fig.update_layout(
-        title=f"{metric_labels.get(metric, metric).title()} Over Time",
-        xaxis_title="Date",
-        yaxis_title=metric_labels.get(metric, metric),
-        hovermode='x unified',
-        height=400
-    )
+    if chart_type == 'line':
+        # Calculate moving averages
+        filtered_df = calculate_moving_averages(filtered_df, metric)
+        
+        # Create line chart
+        fig = go.Figure()
+        
+        # Daily values (lighter)
+        fig.add_trace(go.Scatter(
+            x=filtered_df['date'],
+            y=filtered_df[metric],
+            mode='lines',
+            name='Daily',
+            line=dict(color='lightblue', width=1),
+            opacity=0.6
+        ))
+        
+        # 7-day moving average
+        fig.add_trace(go.Scatter(
+            x=filtered_df['date'],
+            y=filtered_df[f'{metric}_ma7'],
+            mode='lines',
+            name='7-day MA',
+            line=dict(color='orange', width=2)
+        ))
+        
+        # 30-day moving average
+        fig.add_trace(go.Scatter(
+            x=filtered_df['date'],
+            y=filtered_df[f'{metric}_ma30'],
+            mode='lines',
+            name='30-day MA',
+            line=dict(color='red', width=2)
+        ))
+        
+        fig.update_layout(
+            title=f"{metric_labels.get(metric, metric).title()} Over Time",
+            xaxis_title="Date",
+            yaxis_title=metric_labels.get(metric, metric),
+            hovermode='x unified',
+            height=400
+        )
+        
+    else:  # bar chart
+        # Create aggregated data based on chart_type
+        if chart_type == 'week':
+            filtered_df['period'] = filtered_df['date'].dt.to_period('W-MON')  # Week starting Monday
+            period_label = "Week"
+            date_format = lambda x: f"Week of {x.start_time.strftime('%Y-%m-%d')}"
+        elif chart_type == 'month':
+            filtered_df['period'] = filtered_df['date'].dt.to_period('M')
+            period_label = "Month"
+            date_format = lambda x: x.strftime('%Y-%m')
+        elif chart_type == 'quarter':
+            filtered_df['period'] = filtered_df['date'].dt.to_period('Q')
+            period_label = "Quarter"
+            date_format = lambda x: f"Q{x.quarter} {x.year}"
+        
+        # Calculate averages per period
+        agg_data = filtered_df.groupby('period')[metric].mean().reset_index()
+        agg_data['period_label'] = agg_data['period'].apply(date_format)
+        
+        # Create bar chart
+        fig = go.Figure()
+        
+        # Format values based on metric type
+        if 'hours' in metric:
+            text_format = lambda val: f'{val:.1f}h'
+            value_format = 1
+        elif 'efficiency' in metric:
+            text_format = lambda val: f'{val:.1f}%'
+            value_format = 1
+        else:
+            text_format = lambda val: f'{val:.0f}'
+            value_format = 0
+        
+        fig.add_trace(go.Bar(
+            x=agg_data['period_label'],
+            y=agg_data[metric],
+            name=f'Average {metric_labels.get(metric, metric)}',
+            marker_color='darkslateblue',
+            text=[text_format(val) for val in agg_data[metric]],
+            textposition='outside'
+        ))
+        
+        fig.update_layout(
+            title=f"Average {metric_labels.get(metric, metric).title()} per {period_label}",
+            xaxis_title=period_label,
+            yaxis_title=f"Average {metric_labels.get(metric, metric)}",
+            height=400,
+            xaxis={'tickangle': 45}
+        )
     
     return fig
 
@@ -349,6 +438,20 @@ def main():
         default=list(all_sources)
     )
     
+    # Chart type selection
+    st.sidebar.header("📊 Chart Options")
+    chart_type = st.sidebar.selectbox(
+        "Chart Type",
+        options=['line', 'week', 'month', 'quarter'],
+        format_func=lambda x: {
+            'line': '📈 Line Chart (Daily + Moving Averages)',
+            'week': '📊 Bar Chart (Weekly Averages)',
+            'month': '📊 Bar Chart (Monthly Averages)', 
+            'quarter': '📊 Bar Chart (Quarterly Averages)'
+        }[x],
+        index=0
+    )
+    
     # Filter data by source
     if selected_sources:
         if not activity_df.empty:
@@ -407,6 +510,13 @@ def main():
         else:
             st.metric("Avg Sleep Efficiency", "No data")
     
+    # Chart type description
+    if chart_type == 'line':
+        st.info("📈 **Line Chart Mode**: Shows daily values with 7-day and 30-day moving averages to identify trends.")
+    else:
+        period_names = {'week': 'Weekly', 'month': 'Monthly', 'quarter': 'Quarterly'}
+        st.info(f"📊 **Bar Chart Mode**: Shows average values per {chart_type} for easy comparison of {period_names[chart_type].lower()} performance.")
+    
     # Activity Data Visualization
     if not activity_df.empty:
         st.header("🚶 Activity Data")
@@ -417,7 +527,7 @@ def main():
         
         for tab, metric in zip(activity_tabs, activity_metrics):
             with tab:
-                fig = create_activity_chart(activity_df, metric, (start_date, end_date))
+                fig = create_activity_chart(activity_df, metric, (start_date, end_date), chart_type)
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
                 else:
@@ -433,7 +543,7 @@ def main():
         
         for tab, metric in zip(sleep_tabs, sleep_metrics):
             with tab:
-                fig = create_sleep_chart(sleep_df, metric, (start_date, end_date))
+                fig = create_sleep_chart(sleep_df, metric, (start_date, end_date), chart_type)
                 if fig:
                     st.plotly_chart(fig, use_container_width=True)
                 else:
