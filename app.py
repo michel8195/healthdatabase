@@ -88,6 +88,8 @@ def load_sleep_data():
         query = """
         SELECT 
             date,
+            sleep_start,
+            sleep_end,
             total_sleep_minutes,
             deep_sleep_minutes,
             light_sleep_minutes,
@@ -117,6 +119,16 @@ def load_sleep_data():
         df['deep_sleep_hours'] = df['deep_sleep_minutes'] / 60
         df['light_sleep_hours'] = df['light_sleep_minutes'] / 60
         df['rem_sleep_hours'] = df['rem_sleep_minutes'] / 60
+        
+        # Parse sleep times and extract bed time and wake time
+        df['sleep_start_dt'] = pd.to_datetime(df['sleep_start'], utc=True).dt.tz_convert('America/Sao_Paulo')
+        df['sleep_end_dt'] = pd.to_datetime(df['sleep_end'], utc=True).dt.tz_convert('America/Sao_Paulo')
+        
+        # Extract bed time as time of day (in decimal hours)
+        df['bed_time_hours'] = df['sleep_start_dt'].dt.hour + df['sleep_start_dt'].dt.minute / 60
+        
+        # Extract wake time as time of day (in decimal hours)
+        df['wake_time_hours'] = df['sleep_end_dt'].dt.hour + df['sleep_end_dt'].dt.minute / 60
         
         return df
     except Exception as e:
@@ -255,7 +267,9 @@ def create_sleep_chart(df, metric, date_range, chart_type='line'):
         'deep_sleep_hours': 'Deep Sleep (hours)',
         'light_sleep_hours': 'Light Sleep (hours)',
         'rem_sleep_hours': 'REM Sleep (hours)',
-        'sleep_efficiency': 'Sleep Efficiency (%)'
+        'sleep_efficiency': 'Sleep Efficiency (%)',
+        'bed_time_hours': 'Bed Time',
+        'wake_time_hours': 'Wake Time'
     }
     
     if chart_type == 'line':
@@ -324,15 +338,21 @@ def create_sleep_chart(df, metric, date_range, chart_type='line'):
         fig = go.Figure()
         
         # Format values based on metric type
-        if 'hours' in metric:
+        if metric in ['bed_time_hours', 'wake_time_hours']:
+            # Convert decimal hours back to time format
+            def time_format(val):
+                if metric == 'bed_time_hours' and val >= 24:
+                    val = val - 24  # Convert back from next-day representation
+                hour = int(val)
+                minute = int((val - hour) * 60)
+                return f'{hour:02d}:{minute:02d}'
+            text_format = time_format
+        elif 'hours' in metric:
             text_format = lambda val: f'{val:.1f}h'
-            value_format = 1
         elif 'efficiency' in metric:
             text_format = lambda val: f'{val:.1f}%'
-            value_format = 1
         else:
             text_format = lambda val: f'{val:.0f}'
-            value_format = 0
         
         fig.add_trace(go.Bar(
             x=agg_data['period_label'],
@@ -343,13 +363,41 @@ def create_sleep_chart(df, metric, date_range, chart_type='line'):
             textposition='outside'
         ))
         
-        fig.update_layout(
-            title=f"Average {metric_labels.get(metric, metric).title()} per {period_label}",
-            xaxis_title=period_label,
-            yaxis_title=f"Average {metric_labels.get(metric, metric)}",
-            height=400,
-            xaxis={'tickangle': 45}
-        )
+        layout_config = {
+            'title': f"Average {metric_labels.get(metric, metric).title()} per {period_label}",
+            'xaxis_title': period_label,
+            'yaxis_title': f"Average {metric_labels.get(metric, metric)}",
+            'height': 400,
+            'xaxis': {'tickangle': 45}
+        }
+        
+        # Custom y-axis formatting for time metrics
+        if metric in ['bed_time_hours', 'wake_time_hours']:
+            def format_time_tick(val):
+                if metric == 'bed_time_hours' and val >= 24:
+                    val = val - 24
+                hour = int(val)
+                minute = int((val - hour) * 60)
+                return f'{hour:02d}:{minute:02d}'
+            
+            # Create custom tick values and labels
+            y_min, y_max = agg_data[metric].min(), agg_data[metric].max()
+            
+            if metric == 'bed_time_hours':
+                # For bed time, show times from evening to early morning
+                tick_vals = list(range(int(y_min), int(y_max) + 2))
+                tick_text = [format_time_tick(val) for val in tick_vals]
+            else:
+                # For wake time, show normal morning times
+                tick_vals = list(range(int(y_min), int(y_max) + 2))
+                tick_text = [format_time_tick(val) for val in tick_vals]
+            
+            layout_config['yaxis'] = {
+                'tickvals': tick_vals,
+                'ticktext': tick_text
+            }
+        
+        fig.update_layout(**layout_config)
     
     return fig
 
@@ -537,9 +585,9 @@ def main():
     if not sleep_df.empty:
         st.header("😴 Sleep Data")
         
-        sleep_tabs = st.tabs(["Total Sleep", "Deep Sleep", "Light Sleep", "REM Sleep", "Sleep Efficiency"])
+        sleep_tabs = st.tabs(["Total Sleep", "Deep Sleep", "Light Sleep", "REM Sleep", "Sleep Efficiency", "Bed Time", "Wake Time"])
         
-        sleep_metrics = ['total_sleep_hours', 'deep_sleep_hours', 'light_sleep_hours', 'rem_sleep_hours', 'sleep_efficiency']
+        sleep_metrics = ['total_sleep_hours', 'deep_sleep_hours', 'light_sleep_hours', 'rem_sleep_hours', 'sleep_efficiency', 'bed_time_hours', 'wake_time_hours']
         
         for tab, metric in zip(sleep_tabs, sleep_metrics):
             with tab:
