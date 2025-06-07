@@ -597,6 +597,305 @@ def main():
                 else:
                     st.info("No data available for the selected date range.")
     
+    # Correlation Analysis
+    if not activity_df.empty and not sleep_df.empty:
+        st.header("🔗 Correlation Analysis")
+        
+        # Merge activity and sleep data by date
+        merged_df = pd.merge(
+            activity_df[['date', 'steps', 'calories', 'distance', 'active_minutes']],
+            sleep_df[['date', 'total_sleep_hours', 'sleep_efficiency', 'deep_sleep_hours']],
+            on='date',
+            how='inner'
+        )
+        
+        # Filter by date range and remove invalid sleep data
+        merged_df = merged_df[
+            (merged_df['date'] >= start_date) & 
+            (merged_df['date'] <= end_date) &
+            (merged_df['total_sleep_hours'] > 0)  # Exclude days with no sleep data
+        ]
+        
+        if not merged_df.empty and len(merged_df) > 1:
+            st.info(f"📊 **Correlation Analysis**: Analyzing {len(merged_df)} days with both activity and sleep data.")
+            
+            # Analysis options
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                corr_aggregation = st.selectbox(
+                    "Aggregation Level",
+                    options=['daily', 'weekly', 'monthly'],
+                    format_func=lambda x: {
+                        'daily': '📅 Daily Analysis',
+                        'weekly': '📊 Weekly Analysis', 
+                        'monthly': '📈 Monthly Analysis'
+                    }[x],
+                    index=0,
+                    key="correlation_agg"
+                )
+            
+            with col2:
+                include_outliers = st.checkbox(
+                    "Include outliers",
+                    value=True,
+                    help="Outliers are data points that fall outside 1.5 * IQR from Q1/Q3"
+                )
+            
+            # Prepare data based on aggregation level
+            if corr_aggregation == 'daily':
+                agg_df = merged_df.copy()
+                period_label = "Daily"
+                date_col = 'date'
+            elif corr_aggregation == 'weekly':
+                # Group by week
+                merged_df['week'] = merged_df['date'].dt.to_period('W-MON')
+                agg_df = merged_df.groupby('week').agg({
+                    'steps': 'mean',  # Average steps per week
+                    'total_sleep_hours': 'mean',  # Average sleep hours per week
+                    'sleep_efficiency': 'mean',
+                    'deep_sleep_hours': 'mean',
+                    'calories': 'mean',
+                    'active_minutes': 'mean'
+                }).reset_index()
+                agg_df['period_label'] = agg_df['week'].apply(lambda x: f"Week of {x.start_time.strftime('%Y-%m-%d')}")
+                period_label = "Weekly"
+                date_col = 'period_label'
+            else:  # monthly
+                # Group by month
+                merged_df['month'] = merged_df['date'].dt.to_period('M')
+                agg_df = merged_df.groupby('month').agg({
+                    'steps': 'mean',  # Average steps per month
+                    'total_sleep_hours': 'mean',  # Average sleep hours per month
+                    'sleep_efficiency': 'mean',
+                    'deep_sleep_hours': 'mean',
+                    'calories': 'mean',
+                    'active_minutes': 'mean'
+                }).reset_index()
+                agg_df['period_label'] = agg_df['month'].apply(lambda x: x.strftime('%Y-%m'))
+                period_label = "Monthly"
+                date_col = 'period_label'
+            
+            if len(agg_df) > 1:
+                # Detect outliers using IQR method
+                def detect_outliers(data, column):
+                    Q1 = data[column].quantile(0.25)
+                    Q3 = data[column].quantile(0.75)
+                    IQR = Q3 - Q1
+                    lower_bound = Q1 - 1.5 * IQR
+                    upper_bound = Q3 + 1.5 * IQR
+                    return (data[column] < lower_bound) | (data[column] > upper_bound)
+                
+                # Identify outliers for both steps and sleep hours
+                steps_outliers = detect_outliers(agg_df, 'steps')
+                sleep_outliers = detect_outliers(agg_df, 'total_sleep_hours')
+                agg_df['is_outlier'] = steps_outliers | sleep_outliers
+                
+                # Create filtered dataset if outliers should be excluded
+                if include_outliers:
+                    corr_df = agg_df.copy()
+                    outlier_info = f"Including {agg_df['is_outlier'].sum()} outliers"
+                else:
+                    corr_df = agg_df[~agg_df['is_outlier']].copy()
+                    outlier_info = f"Excluding {agg_df['is_outlier'].sum()} outliers"
+                
+                if len(corr_df) > 1:
+                    st.info(f"📊 **Analysis**: {len(corr_df)} periods used for correlation. {outlier_info}.")
+                    
+                    # Calculate correlations using filtered data
+                    correlations = {
+                        'Steps vs Avg Sleep': corr_df['steps'].corr(corr_df['total_sleep_hours']),
+                        'Steps vs Sleep Efficiency': corr_df['steps'].corr(corr_df['sleep_efficiency']),
+                        'Steps vs Avg Deep Sleep': corr_df['steps'].corr(corr_df['deep_sleep_hours']),
+                        'Active Minutes vs Avg Sleep': corr_df['active_minutes'].corr(corr_df['total_sleep_hours']),
+                        'Calories vs Avg Sleep': corr_df['calories'].corr(corr_df['total_sleep_hours'])
+                    }
+                else:
+                    st.warning("Not enough data points after outlier filtering.")
+                    return
+                
+                # Display correlation metrics
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    steps_sleep_corr = correlations['Steps vs Avg Sleep']
+                    if not pd.isna(steps_sleep_corr):
+                        sleep_label = "Avg Sleep Hours" if corr_aggregation != 'daily' else "Sleep Hours"
+                        st.metric(
+                            f"Steps ↔ {sleep_label}", 
+                            f"{steps_sleep_corr:.3f}",
+                            help="Correlation coefficient (-1 to 1). Values closer to ±1 indicate stronger relationships."
+                        )
+                    else:
+                        st.metric("Steps ↔ Avg Sleep", "N/A")
+                
+                with col2:
+                    steps_efficiency_corr = correlations['Steps vs Sleep Efficiency']
+                    if not pd.isna(steps_efficiency_corr):
+                        st.metric("Steps ↔ Sleep Efficiency", f"{steps_efficiency_corr:.3f}")
+                    else:
+                        st.metric("Steps ↔ Sleep Efficiency", "N/A")
+                
+                with col3:
+                    active_sleep_corr = correlations['Active Minutes vs Avg Sleep']
+                    if not pd.isna(active_sleep_corr):
+                        sleep_label = "Avg Sleep Hours" if corr_aggregation != 'daily' else "Sleep Hours"
+                        st.metric(f"Active Minutes ↔ {sleep_label}", f"{active_sleep_corr:.3f}")
+                    else:
+                        st.metric("Active Minutes ↔ Avg Sleep", "N/A")
+                
+                # Scatter plot for steps vs sleep
+                sleep_unit = "hours" if corr_aggregation != 'daily' else "hours"
+                sleep_desc = "Average Sleep" if corr_aggregation != 'daily' else "Sleep"
+                st.subheader(f"📈 {period_label} Steps vs {sleep_desc} Relationship")
+                
+                fig_scatter = go.Figure()
+                
+                # Prepare hover template and labels
+                if corr_aggregation == 'daily':
+                    hover_template = '<b>%{text}</b><br>Steps: %{x:,}<br>Sleep: %{y:.1f}h<extra></extra>'
+                    text_data = agg_df['date'].dt.strftime('%Y-%m-%d')
+                    x_title = f"{period_label} Steps"
+                    y_title = f"Sleep Hours"
+                else:
+                    hover_template = '<b>%{text}</b><br>Avg Steps: %{x:,}<br>Avg Sleep: %{y:.1f}h<extra></extra>'
+                    text_data = agg_df[date_col]
+                    x_title = f"{period_label} Average Steps"
+                    y_title = f"Average Sleep Hours"
+                
+                # Add normal data points
+                normal_data = agg_df[~agg_df['is_outlier']]
+                if len(normal_data) > 0:
+                    fig_scatter.add_trace(go.Scatter(
+                        x=normal_data['steps'],
+                        y=normal_data['total_sleep_hours'],
+                        mode='markers',
+                        name=f'{period_label} Data',
+                        marker=dict(
+                            size=10 if corr_aggregation != 'daily' else 8,
+                            color='steelblue',
+                            opacity=0.7
+                        ),
+                        text=normal_data[date_col] if corr_aggregation != 'daily' else normal_data['date'].dt.strftime('%Y-%m-%d'),
+                        hovertemplate=hover_template
+                    ))
+                
+                # Add outliers in red
+                outlier_data = agg_df[agg_df['is_outlier']]
+                if len(outlier_data) > 0:
+                    fig_scatter.add_trace(go.Scatter(
+                        x=outlier_data['steps'],
+                        y=outlier_data['total_sleep_hours'],
+                        mode='markers',
+                        name='Outliers',
+                        marker=dict(
+                            size=12 if corr_aggregation != 'daily' else 10,
+                            color='red',
+                            opacity=0.8,
+                            symbol='diamond'
+                        ),
+                        text=outlier_data[date_col] if corr_aggregation != 'daily' else outlier_data['date'].dt.strftime('%Y-%m-%d'),
+                        hovertemplate=hover_template.replace('<extra></extra>', ' (Outlier)<extra></extra>')
+                    ))
+                
+                # Add trend line if correlation exists (using filtered data for calculation)
+                if not pd.isna(steps_sleep_corr) and abs(steps_sleep_corr) > 0.1:
+                    import numpy as np
+                    z = np.polyfit(corr_df['steps'], corr_df['total_sleep_hours'], 1)
+                    p = np.poly1d(z)
+                    x_trend = np.linspace(agg_df['steps'].min(), agg_df['steps'].max(), 100)
+                    y_trend = p(x_trend)
+                    
+                    trend_color = 'darkred' if not include_outliers else 'red'
+                    trend_name = f'Trend Line (r={steps_sleep_corr:.3f})'
+                    if not include_outliers:
+                        trend_name += ' - No Outliers'
+                    
+                    fig_scatter.add_trace(go.Scatter(
+                        x=x_trend,
+                        y=y_trend,
+                        mode='lines',
+                        name=trend_name,
+                        line=dict(color=trend_color, width=2, dash='dash')
+                    ))
+                
+                fig_scatter.update_layout(
+                    title=f"{period_label} Steps vs {sleep_desc} Hours",
+                    xaxis_title=x_title,
+                    yaxis_title=y_title,
+                    height=400,
+                    hovermode='closest'
+                )
+                
+                st.plotly_chart(fig_scatter, use_container_width=True)
+                
+                # Interpretation
+                if not pd.isna(steps_sleep_corr):
+                    st.subheader("🔍 Correlation Interpretation")
+                    if abs(steps_sleep_corr) >= 0.7:
+                        strength = "Strong"
+                    elif abs(steps_sleep_corr) >= 0.3:
+                        strength = "Moderate"
+                    elif abs(steps_sleep_corr) >= 0.1:
+                        strength = "Weak"
+                    else:
+                        strength = "Very weak"
+                    
+                    direction = "positive" if steps_sleep_corr > 0 else "negative"
+                    
+                    time_context = {
+                        'daily': 'daily steps and sleep hours',
+                        'weekly': 'weekly average steps and average sleep hours',
+                        'monthly': 'monthly average steps and average sleep hours'
+                    }
+                    
+                    st.write(f"**{strength} {direction} correlation** between {time_context[corr_aggregation]}.")
+                    
+                    if steps_sleep_corr > 0.3:
+                        activity_context = {
+                            'daily': 'Higher daily activity levels are associated with longer sleep duration',
+                            'weekly': 'Weeks with higher average activity show better average sleep',
+                            'monthly': 'Months with higher average activity show better average sleep'
+                        }
+                        st.success(f"✅ {activity_context[corr_aggregation]}.")
+                    elif steps_sleep_corr < -0.3:
+                        activity_context = {
+                            'daily': 'Higher daily activity levels are associated with shorter sleep duration',
+                            'weekly': 'Weeks with higher average activity show worse average sleep',
+                            'monthly': 'Months with higher average activity show worse average sleep'
+                        }
+                        st.warning(f"⚠️ {activity_context[corr_aggregation]}.")
+                    else:
+                        st.info(f"ℹ️ No strong relationship detected between {corr_aggregation} activity and sleep.")
+                
+                # Summary stats for aggregated data
+                if corr_aggregation != 'daily':
+                    st.subheader(f"📊 {period_label} Summary Statistics")
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        avg_steps = agg_df['steps'].mean()
+                        st.metric(f"Avg {period_label} Steps", f"{avg_steps:,.0f}")
+                    
+                    with col2:
+                        avg_sleep = agg_df['total_sleep_hours'].mean()
+                        st.metric(f"Avg Sleep/Day", f"{avg_sleep:.1f}h")
+                    
+                    with col3:
+                        periods_count = len(agg_df)
+                        outlier_count = agg_df['is_outlier'].sum()
+                        st.metric(f"{period_label.capitalize()} periods", f"{periods_count} ({outlier_count} outliers)")
+                    
+                    with col4:
+                        date_range_text = f"{len(merged_df)} days"
+                        st.metric("Days analyzed", date_range_text)
+            
+            else:
+                st.warning(f"Not enough {corr_aggregation} periods for correlation analysis.")
+        
+        else:
+            st.warning("Not enough overlapping data for correlation analysis.")
+    
     # Data Export
     st.header("📥 Data Export")
     col1, col2 = st.columns(2)
