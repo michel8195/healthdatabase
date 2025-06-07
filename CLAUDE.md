@@ -43,6 +43,23 @@ python scripts/sleep_data_summary.py
 ```
 
 ### Analysis
+
+#### Interactive Web Dashboard 🌟
+```bash
+# Launch the interactive web dashboard (recommended)
+python run_dashboard.py
+# or directly with streamlit
+streamlit run app.py
+
+# Features:
+# - Date range selection (last 3 years)
+# - Daily values with 7-day and 30-day moving averages
+# - Activity metrics: steps, calories, distance, active minutes
+# - Sleep metrics: total sleep, deep/light/REM sleep, efficiency
+# - Data export to CSV
+```
+
+#### Jupyter Notebooks  
 ```bash
 # Start Jupyter for data exploration
 jupyter notebook notebooks/health_data_exploration.ipynb
@@ -87,6 +104,7 @@ pytest -x
 pip install -r requirements.txt
 
 # Core analysis tools: pandas, matplotlib, seaborn, numpy, jupyter
+# Web UI tools: streamlit, plotly  
 # Testing tools: pytest, pytest-cov
 # No external dependencies for core database functionality (uses Python stdlib)
 ```
