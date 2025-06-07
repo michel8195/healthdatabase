@@ -67,7 +67,12 @@ def load_activity_data():
         if not results:
             return pd.DataFrame()
         
-        df = pd.DataFrame(results)
+        # Convert sqlite3.Row objects to dictionaries
+        data = []
+        for row in results:
+            data.append(dict(row))
+        
+        df = pd.DataFrame(data)
         df['date'] = pd.to_datetime(df['date'])
         return df
     except Exception as e:
@@ -99,7 +104,12 @@ def load_sleep_data():
         if not results:
             return pd.DataFrame()
         
-        df = pd.DataFrame(results)
+        # Convert sqlite3.Row objects to dictionaries
+        data = []
+        for row in results:
+            data.append(dict(row))
+        
+        df = pd.DataFrame(data)
         df['date'] = pd.to_datetime(df['date'])
         
         # Convert minutes to hours for better readability
@@ -264,9 +274,30 @@ def main():
         activity_df = load_activity_data()
         sleep_df = load_sleep_data()
     
+    # Debug information
+    st.sidebar.header("🔍 Data Debug Info")
+    st.sidebar.write(f"Activity records: {len(activity_df)}")
+    st.sidebar.write(f"Sleep records: {len(sleep_df)}")
+    
+    if not activity_df.empty:
+        st.sidebar.write(f"Activity date range: {activity_df['date'].min().date()} to {activity_df['date'].max().date()}")
+    if not sleep_df.empty:
+        st.sidebar.write(f"Sleep date range: {sleep_df['date'].min().date()} to {sleep_df['date'].max().date()}")
+    
     if activity_df.empty and sleep_df.empty:
         st.error("No data found. Please ensure your database contains data.")
         st.info("Run the import scripts to populate your database with health data.")
+        
+        # Show more debug info
+        with st.expander("🔧 Debug Information"):
+            st.write("Database file exists:", Path("data/health_data.db").exists())
+            try:
+                from src.database.connection import DatabaseConnection
+                db = DatabaseConnection("data/health_data.db")
+                tables = db.execute_query("SELECT name FROM sqlite_master WHERE type='table'")
+                st.write("Available tables:", [dict(t)['name'] for t in tables])
+            except Exception as e:
+                st.write("Database error:", str(e))
         return
     
     # Sidebar controls
