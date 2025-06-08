@@ -856,7 +856,7 @@ def main():
             'month': '📊 Bar Chart (Monthly Averages)', 
             'quarter': '📊 Bar Chart (Quarterly Averages)'
         }[x],
-        index=0
+        index=1
     )
     
     # Filter data by source
