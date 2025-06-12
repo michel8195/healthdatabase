@@ -173,8 +173,8 @@ def get_sport_type_mapping():
         22: 'Football',
         42: 'Tennis',
         52: 'Strength Training',
-        53: 'Fitness',
-        60: 'Elliptical',
+        53: 'Stretching',
+        60: 'Yoga',
         105: 'Treadmill'
     }
 
@@ -701,7 +701,7 @@ def create_sport_activity_chart(df, metric='activity_count', period='weekly'):
     periods = analysis['period_label'].unique()
     sport_types = analysis['sport_name'].unique()
     
-    # Create a bar for each sport type
+    # Create a bar for each sport type (only for sports with data)
     colors = px.colors.qualitative.Set3
     for i, sport in enumerate(sport_types):
         sport_data = analysis[analysis['sport_name'] == sport]
@@ -717,14 +717,16 @@ def create_sport_activity_chart(df, metric='activity_count', period='weekly'):
                 full_data.append(0)
             full_periods.append(period)
         
-        fig.add_trace(go.Bar(
-            name=sport,
-            x=full_periods,
-            y=full_data,
-            text=[text_format(val) if val > 0 else '' for val in full_data],
-            textposition='inside',
-            marker_color=colors[i % len(colors)]
-        ))
+        # Only add trace if sport has data (sum > 0)
+        if sum(full_data) > 0:
+            fig.add_trace(go.Bar(
+                name=sport,
+                x=full_periods,
+                y=full_data,
+                text=[text_format(val) if val > 0 else '' for val in full_data],
+                textposition='inside',
+                marker_color=colors[i % len(colors)]
+            ))
     
     fig.update_layout(
         title=title,
@@ -996,6 +998,93 @@ def main():
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.info("No data available for the selected date range.")
+        
+        # Weekday Analysis
+        st.subheader("📅 Average Steps by Weekday")
+        
+        # Filter data by date range
+        weekday_df = activity_df[
+            (activity_df['date'] >= start_date) & 
+            (activity_df['date'] <= end_date)
+        ].copy()
+        
+        if not weekday_df.empty:
+            # Add weekday information
+            weekday_df['weekday'] = weekday_df['date'].dt.day_name()
+            weekday_df['weekday_num'] = weekday_df['date'].dt.dayofweek
+            
+            # Calculate average steps by weekday
+            weekday_avg = weekday_df.groupby(['weekday_num', 'weekday'])['steps'].agg(['mean', 'std', 'count']).reset_index()
+            
+            # Sort by weekday number to ensure correct order (Monday=0, Sunday=6)
+            weekday_avg = weekday_avg.sort_values('weekday_num')
+            
+            # Create bar chart
+            fig_weekday = go.Figure()
+            
+            # Define colors for each day (gradient from blue to red)
+            colors = ['#3498db', '#2ecc71', '#f1c40f', '#e67e22', '#e74c3c', '#9b59b6', '#1abc9c']
+            
+            fig_weekday.add_trace(go.Bar(
+                x=weekday_avg['weekday'],
+                y=weekday_avg['mean'],
+                name='Average Steps',
+                marker_color=colors,
+                error_y=dict(
+                    type='data',
+                    array=weekday_avg['std'],
+                    visible=True,
+                    color='gray',
+                    thickness=1.5,
+                    width=4
+                ),
+                text=[f'{val:.0f}' for val in weekday_avg['mean']],
+                textposition='outside',
+                hovertemplate='<b>%{x}</b><br>Average: %{y:,.0f} steps<br>±%{error_y.array:.0f} std<br>Days: %{customdata}<extra></extra>',
+                customdata=weekday_avg['count']
+            ))
+            
+            # Add overall average line
+            overall_avg = weekday_df['steps'].mean()
+            fig_weekday.add_hline(
+                y=overall_avg, 
+                line_dash="dash", 
+                line_color="red",
+                annotation_text=f"Overall Average: {overall_avg:,.0f}",
+                annotation_position="top left"
+            )
+            
+            fig_weekday.update_layout(
+                title="Average Steps by Day of Week",
+                xaxis_title="Day of Week",
+                yaxis_title="Average Steps",
+                height=400,
+                showlegend=False
+            )
+            
+            st.plotly_chart(fig_weekday, use_container_width=True)
+            
+            # Additional insights
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                best_day = weekday_avg.loc[weekday_avg['mean'].idxmax(), 'weekday']
+                best_steps = weekday_avg['mean'].max()
+                st.metric("Most Active Day", f"{best_day}", f"{best_steps:,.0f} avg steps")
+            
+            with col2:
+                least_day = weekday_avg.loc[weekday_avg['mean'].idxmin(), 'weekday']
+                least_steps = weekday_avg['mean'].min()
+                st.metric("Least Active Day", f"{least_day}", f"{least_steps:,.0f} avg steps")
+            
+            with col3:
+                weekend_avg = weekday_avg[weekday_avg['weekday_num'].isin([5, 6])]['mean'].mean()
+                weekday_avg_steps = weekday_avg[weekday_avg['weekday_num'].isin([0, 1, 2, 3, 4])]['mean'].mean()
+                diff = weekend_avg - weekday_avg_steps
+                st.metric("Weekend vs Weekday", f"{diff:+,.0f} steps", 
+                         f"Weekend: {weekend_avg:,.0f} | Weekday: {weekday_avg_steps:,.0f}")
+        else:
+            st.info("No data available for weekday analysis in the selected date range.")
     
     # Sleep Data Visualization
     if not sleep_df.empty:
